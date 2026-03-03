@@ -1,0 +1,16 @@
+1. HEALTH: {'status': 'ok'}
+
+=== CHAT 1: Telling AI my name ===
+   AI response: Que prazer! Meu novo contato, Carlos, engenheiro de redes da CGR Telecom. Estou aqui para ajudá-lo com qualquer dúvida ou questão relacionada a protocolos de rede, redes de alta velocidade, autenticaç
+   Session: f147207b57d8
+
+=== MEMORIES AFTER CHAT 1 ===
+   Total memories: 1
+   - [chat] O usuário pediu para lembrar: Meu nome é Carlos e eu trabalho na CGR Telecom como engenheiro de redes. Lembre disso.
+
+=== CHAT 2: New session asking 'qual meu nome?' ===
+   AI response: Peço desculpas, mas não tenho acesso a essa informação. Nossa conversa começou com um texto sobre redes de computadores, mas não há nenhuma informação pessoal disponível sobre você. Se você quiser compartilhar seus detalhes, ficarei feliz em tentar ajudá-lo com qualquer pergunta ou preocupação!
+   Sources: ['REDESD_1.md', '💾 Memória de conversas']
+
+=== KNOWLEDGE STATS ===
+   {'total_chunks': 50, 'total_documents': 5, 'total_memories': 1, 'total_sessions': 3, 'sources': ['conhecimento_cgr.jsonl', 'NOKIA_OLT_POL_Type_FX.md', 'Nokia_Optical_LAN_Solution_Brochure_EN-compressed.md', 'Protocolo OSPF - Treinar IA.md', 'REDESD_1.md']}

@@ -1,0 +1,15 @@
+HEALTH: 200 {'status': 'ok'}
+OLLAMA: 200 {'status': 'connected', 'models': ['llama3.2:latest', 'llama3.1:latest', 'llama3:latest']}
+OLLAMA DIRECT: 200 models=['llama3.2:latest', 'llama3.1:latest', 'llama3:latest']
+KNOWLEDGE: 200 {'total_chunks': 0, 'total_documents': 0, 'sources': []}
+CHAT: status=200
+  event: token
+  data: {"token": "Ol"}
+  event: token
+  data: {"token": "á"}
+  event: token
+  data: {"token": "!"}
+  event: token
+  data: {"token": " Como"}
+  event: token
+  data: {"token": " pos"}

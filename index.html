@@ -1,0 +1,756 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CGR Telecom  Assistente IA</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *{font-family:'Inter',sans-serif;}code,.mono{font-family:'JetBrains Mono',monospace;}
+        body{background:#050810;overflow:hidden;height:100vh;}
+        #aurora{position:fixed;inset:0;z-index:0;pointer-events:none;
+            background:
+                radial-gradient(ellipse 80% 55% at 50% -5%,rgba(0,190,105,0.20) 0%,transparent 70%),
+                radial-gradient(ellipse 55% 40% at 85% 105%,rgba(0,150,85,0.13) 0%,transparent 60%),
+                radial-gradient(ellipse 45% 35% at 18% 92%,rgba(0,110,65,0.10) 0%,transparent 60%);
+            animation:aur 14s ease-in-out infinite alternate;}
+        @keyframes aur{0%{opacity:1}50%{opacity:.72}100%{opacity:1}}
+        .glass{background:rgba(8,13,26,.76);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
+        .panel{background:rgba(15,23,42,.68);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
+        ::-webkit-scrollbar{width:4px;height:4px;}
+        ::-webkit-scrollbar-track{background:transparent;}
+        ::-webkit-scrollbar-thumb{background:rgba(0,208,132,.22);border-radius:3px;}
+        ::-webkit-scrollbar-thumb:hover{background:rgba(0,208,132,.42);}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        .msg-in{animation:fadeUp .28s ease-out;}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+        .typing::after{content:'|';animation:blink .75s infinite;color:#00d084;margin-left:1px;}
+        @keyframes pring{0%{box-shadow:0 0 0 0 rgba(0,208,132,.55)}70%{box-shadow:0 0 0 8px rgba(0,208,132,0)}100%{box-shadow:0 0 0 0 rgba(0,208,132,0)}}
+        .pring{animation:pring 1.5s infinite;}
+        .bubble-u{background:linear-gradient(135deg,rgba(0,208,132,.20),rgba(0,155,90,.13));border:1px solid rgba(0,208,132,.26);color:#dce8f5;}
+        .bubble-a{background:rgba(15,23,42,.75);border:1px solid rgba(0,208,132,.10);color:#a8bbd4;}
+        .bubble-sys{background:rgba(0,208,132,.06);border:1px solid rgba(0,208,132,.18);color:#6bb89a;}
+        #inp{outline:none;resize:none;background:transparent;border:none;color:#dce8f5;}
+        #inp::placeholder{color:rgba(107,128,160,.55);}
+        #inp-box{background:rgba(15,23,42,.92);border:1px solid rgba(0,208,132,.20);transition:border-color .2s,box-shadow .2s;}
+        #inp-box.focused{border-color:rgba(0,208,132,.55);box-shadow:0 0 0 3px rgba(0,208,132,.09);}
+        .send-btn{background:linear-gradient(135deg,#00d084,#00a067);transition:filter .2s,box-shadow .2s;}
+        .send-btn:hover{filter:brightness(1.14);box-shadow:0 0 18px rgba(0,208,132,.42);}
+        .send-btn:disabled{background:rgba(0,208,132,.12);box-shadow:none;filter:none;cursor:not-allowed;}
+        .attach-btn{color:rgba(0,208,132,.70);transition:color .2s,background .2s;border-radius:.625rem;}
+        .attach-btn:hover{color:#00d084;background:rgba(0,208,132,.10);}
+        .logo-glow{filter:drop-shadow(0 0 10px rgba(0,208,132,.5));}
+        .avatar-ring{box-shadow:0 0 0 2px rgba(0,208,132,.4),0 0 12px rgba(0,208,132,.16);}
+        .chip{border:1px solid rgba(0,208,132,.18);background:rgba(0,208,132,.05);transition:all .2s;}
+        .chip:hover{background:rgba(0,208,132,.13);border-color:rgba(0,208,132,.35);color:#dce8f5;}
+        .sess{border:1px solid transparent;border-radius:.75rem;transition:background .15s,border-color .15s;}
+        .sess.on{background:rgba(0,208,132,.09);border-color:rgba(0,208,132,.22);}
+        .sess:not(.on):hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.07);}
+        .tab-on{color:#00d084;border-bottom:2px solid #00d084;background:rgba(0,208,132,.06);}
+        .tab-off{color:#6b80a0;border-bottom:2px solid transparent;}
+        .tab-off:hover{color:#a8bbd4;background:rgba(255,255,255,.04);}
+        /* Learn card */
+        .learn-step{display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;}
+        .learn-step .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+        .dot-done{background:#00d084;}
+        .dot-running{background:#00d084;animation:pring 1s infinite;}
+        .dot-wait{background:rgba(107,128,160,.35);}
+        #progress-bar{background:linear-gradient(90deg,#00d084,#00a067);}
+        /* File badge */
+        .file-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,208,132,.09);border:1px solid rgba(0,208,132,.22);border-radius:8px;padding:4px 10px;font-size:12px;color:#6bb89a;margin:2px;}
+        .file-badge button{color:rgba(248,113,113,.7);line-height:1;margin-left:2px;font-size:14px;}
+        .file-badge button:hover{color:#f87171;}
+        /* Advanced toggle */
+        #advanced-panel{border-top:1px solid rgba(0,208,132,.10);}
+        /* Constrain chat column so bubbles stay close together */
+        #msgs{display:flex;flex-direction:column;}
+        #msgs>*{width:100%;max-width:760px;margin-left:auto;margin-right:auto;}
+        #msgs>#welcome{max-width:100%;}
+        /* ── Markdown content (Gemini-like readability) ── */
+        .md-content{font-size:15px;line-height:1.8;color:#c8d6e5;}
+        .md-content strong{color:#e8f0fa;font-weight:600;}
+        .md-content em{color:#b0c4de;font-style:italic;}
+        .md-content h1{font-size:21px;font-weight:700;color:#e8f0fa;margin:22px 0 8px;line-height:1.3;}
+        .md-content h2{font-size:18px;font-weight:600;color:#e8f0fa;margin:18px 0 6px;line-height:1.35;padding-bottom:4px;border-bottom:1px solid rgba(0,208,132,.1);}
+        .md-content h3{font-size:16px;font-weight:600;color:#e8f0fa;margin:14px 0 4px;line-height:1.35;}
+        .md-content h1:first-child,.md-content h2:first-child,.md-content h3:first-child{margin-top:0;}
+        .md-content hr{border:none;border-top:1px solid rgba(0,208,132,.13);margin:16px 0;}
+        .md-content ul{list-style:disc;padding-left:22px;margin:8px 0;}
+        .md-content ol{list-style:decimal;padding-left:22px;margin:8px 0;}
+        .md-content li{margin:3px 0;padding-left:2px;}
+        .md-content blockquote{border-left:3px solid rgba(0,208,132,.3);padding:2px 14px;margin:10px 0;color:#7a90a8;font-style:italic;}
+        .md-content pre{background:rgba(0,0,0,.55);border:1px solid rgba(0,208,132,.09);border-radius:10px;padding:14px 16px;margin:12px 0;overflow-x:auto;}
+        .md-content pre code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#5a9a6a;background:none !important;padding:0 !important;border:none !important;border-radius:0 !important;}
+        .md-content code{background:rgba(0,0,0,.45);color:#00d084;border-radius:5px;padding:2px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;}
+        .md-content .spacer{height:12px;}
+    </style>
+</head>
+<body>
+<div id="aurora"></div>
+
+<div class="relative z-10 flex" style="height:100vh;">
+
+<!--  SIDEBAR  -->
+<aside class="w-64 glass flex flex-col flex-shrink-0" style="border-right:1px solid rgba(0,208,132,.11);">
+    <div class="flex items-center justify-center py-5 px-4" style="border-bottom:1px solid rgba(0,208,132,.12);">
+        <img src="img/logo.gif" alt="Logo" class="logo-glow logoheader" title="Home" style="height:48px;width:auto;display:block;">
+    </div>
+
+    <div class="px-3 pt-3 pb-2">
+        <button onclick="newChat()" class="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            style="background:rgba(0,208,132,.10);border:1px solid rgba(0,208,132,.28);color:#00d084;letter-spacing:.01em;"
+            onmouseover="this.style.background='rgba(0,208,132,.18)'" onmouseout="this.style.background='rgba(0,208,132,.10)'">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+            </svg>Nova Conversa
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-3 pb-3">
+        <p class="text-xs uppercase tracking-wider px-2 mb-2" style="color:rgba(107,128,160,.55);font-weight:600;">Histórico</p>
+        <div id="sess-list" class="space-y-1"></div>
+    </div>
+
+    <div class="p-3 space-y-2" style="border-top:1px solid rgba(0,208,132,.09);">
+        <!-- Ollama status -->
+        <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs" style="background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.06);">
+            <span id="ol-dot" class="w-2 h-2 rounded-full flex-shrink-0" style="background:#ef4444;"></span>
+            <span id="ol-txt" style="color:#6b80a0;">Ollama: verificando...</span>
+        </div>
+        <!-- KB status -->
+        <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs" style="background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.06);">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:#00d084;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+            <span id="kb-txt" style="color:#6b80a0;">Base: carregando...</span>
+        </div>
+        <!-- Advanced toggle -->
+        <button onclick="toggleAdvanced()" class="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+            style="background:rgba(0,208,132,.05);border:1px solid rgba(0,208,132,.14);color:rgba(0,208,132,.65);"
+            onmouseover="this.style.background='rgba(0,208,132,.12)';this.style.color='#00d084'" onmouseout="this.style.background='rgba(0,208,132,.05)';this.style.color='rgba(0,208,132,.65)'">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>Avançado / Pipeline
+        </button>
+    </div>
+</aside>
+
+<!--  MAIN  -->
+<main class="flex-1 flex flex-col min-w-0">
+
+    <!-- Advanced panel (hidden by default) -->
+    <div id="advanced-panel" class="hidden flex-shrink-0" style="background:rgba(5,8,16,.85);backdrop-filter:blur(14px);">
+        <div class="flex" style="border-bottom:1px solid rgba(0,208,132,.09);">
+            <button onclick="switchAdv('pipeline')" id="adv-tab-pipeline" class="px-5 py-2.5 text-xs font-medium tab-on transition"> Pipeline</button>
+            <button onclick="switchAdv('knowledge')" id="adv-tab-knowledge" class="px-5 py-2.5 text-xs font-medium tab-off transition"> Base de Conhecimento</button>
+            <button onclick="toggleAdvanced()" class="ml-auto px-4 py-2.5 text-xs transition" style="color:rgba(107,128,160,.6);"> Fechar</button>
+        </div>
+
+        <!-- Pipeline sub-panel -->
+        <div id="adv-pipeline" class="p-4 grid grid-cols-2 gap-4" style="max-height:220px;overflow-y:auto;">
+            <div class="panel rounded-xl p-4" style="border:1px solid rgba(0,208,132,.12);">
+                <h4 class="text-xs font-semibold mb-3 flex items-center gap-1" style="color:#dce8f5;"> Pipeline Manual</h4>
+                <div class="flex gap-2 mb-3 flex-wrap">
+                    <select id="adv-profile" class="rounded-lg text-xs px-2 py-1" style="background:rgba(0,0,0,.5);border:1px solid rgba(0,208,132,.18);color:#a8bbd4;outline:none;">
+                        <option value="safe"> Seguro</option>
+                        <option value="fast"> Rápido</option>
+                    </select>
+                    <label class="flex items-center gap-1.5 text-xs cursor-pointer" style="color:#a8bbd4;">
+                        <input id="adv-force" type="checkbox" style="accent-color:#00d084;">Reprocessar
+                    </label>
+                </div>
+                <div class="flex gap-2">
+                    <button id="adv-start" onclick="startPipeline()"
+                        class="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1"
+                        style="background:linear-gradient(135deg,#00d084,#00a067);color:#000;"> Iniciar</button>
+                    <button id="adv-cancel" onclick="cancelPipeline()" disabled
+                        class="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-30"
+                        style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.28);color:#f87171;"> Cancelar</button>
+                </div>
+                <div id="adv-prog" class="mt-2 hidden">
+                    <div class="flex justify-between text-xs mb-1" style="color:#6b80a0;">
+                        <span id="adv-prog-txt">Processando...</span>
+                        <span id="adv-prog-pct" style="color:#00d084;">0%</span>
+                    </div>
+                    <div class="w-full rounded-full h-1.5" style="background:rgba(0,208,132,.10);">
+                        <div id="adv-prog-bar" class="h-1.5 rounded-full" style="width:0%;background:linear-gradient(90deg,#00d084,#00a067);transition:width .3s;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="panel rounded-xl p-4" style="border:1px solid rgba(0,208,132,.12);">
+                <h4 class="text-xs font-semibold mb-2" style="color:#dce8f5;"> Log</h4>
+                <div id="adv-log" class="mono text-xs leading-relaxed overflow-y-auto whitespace-pre-wrap" style="height:120px;background:rgba(0,0,0,.55);border-radius:6px;padding:8px;color:#5a8a6a;border:1px solid rgba(0,208,132,.08);">Aguardando...</div>
+                <button onclick="ingestKnowledge()" class="mt-2 px-3 py-1.5 rounded-lg text-xs" style="background:rgba(0,208,132,.07);border:1px solid rgba(0,208,132,.20);color:#00d084;"> Forçar ingestão SQLite</button>
+            </div>
+        </div>
+
+        <!-- Knowledge sub-panel -->
+        <div id="adv-knowledge" class="p-4 hidden" style="max-height:220px;overflow-y:auto;">
+            <div class="panel rounded-xl p-4" style="border:1px solid rgba(0,208,132,.12);">
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div class="rounded-lg p-3 text-center" style="background:rgba(0,0,0,.4);border:1px solid rgba(0,208,132,.12);">
+                        <p class="text-xl font-bold" style="color:#00d084;" id="stat-chunks"></p>
+                        <p class="text-xs mt-0.5" style="color:#3d5070;">Chunks</p>
+                    </div>
+                    <div class="rounded-lg p-3 text-center" style="background:rgba(0,0,0,.4);border:1px solid rgba(0,208,132,.12);">
+                        <p class="text-xl font-bold" style="color:#00d084;" id="stat-docs"></p>
+                        <p class="text-xs mt-0.5" style="color:#3d5070;">Documentos</p>
+                    </div>
+                    <div class="rounded-lg p-3 text-center" style="background:rgba(0,0,0,.4);border:1px solid rgba(0,208,132,.12);">
+                        <p class="text-xl font-bold" style="color:#4ade80;" id="stat-status"></p>
+                        <p class="text-xs mt-0.5" style="color:#3d5070;">Status</p>
+                    </div>
+                </div>
+                <div id="source-list" class="space-y-1 overflow-y-auto" style="max-height:80px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!--  CHAT  -->
+    <div class="flex-1 flex flex-col min-h-0">
+        <div id="msgs" class="flex-1 overflow-y-auto py-6 space-y-4" style="padding-left:16px;padding-right:16px;">
+            <!-- Welcome -->
+            <div id="welcome" class="flex flex-col items-center justify-center h-full text-center px-4">
+                <img src="img/logo.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
+                <h2 class="text-xl font-bold mb-1.5" style="color:#dce8f5;">Assistente CGR Telecom</h2>
+                <p class="text-sm max-w-sm mx-auto leading-relaxed mb-5" style="color:#6b80a0;">
+                    Pergunte sobre protocolos, manuais ou normas.<br>
+                    Para <strong style="color:#00d084;">adicionar conhecimento</strong>, clique no 📎 e envie um arquivo.
+                </p>
+                <div id="sug-chips" class="flex flex-wrap gap-2 justify-center">
+                    <span class="text-xs" style="color:#3d5070;">Carregando sugestões...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- File preview bar (shows when files are queued) -->
+        <div id="file-bar" class="hidden px-6 py-2 flex flex-wrap gap-1" style="background:rgba(5,8,16,.7);border-top:1px solid rgba(0,208,132,.09);">
+        </div>
+
+        <!-- Input bar -->
+        <div class="flex-shrink-0 px-4 pb-5 pt-3" style="background:rgba(5,8,16,.80);border-top:1px solid rgba(0,208,132,.09);backdrop-filter:blur(16px);">
+            <div class="max-w-4xl mx-auto">
+                <!-- Unified pill -->
+                <div id="inp-box" class="flex items-end rounded-2xl px-2 py-2 gap-1">
+                    <!-- Attach inside pill -->
+                    <button onclick="document.getElementById('file-in').click()"
+                        class="attach-btn flex-shrink-0 w-9 h-9 flex items-center justify-center"
+                        title="Enviar arquivo para aprendizado">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                        </svg>
+                    </button>
+                    <input id="file-in" type="file" multiple class="hidden"
+                        accept=".pdf,.docx,.xlsx,.pptx,.html,.htm,.csv,.md,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp,.gif,.adoc,.tex"
+                        onchange="queueFiles(event)">
+                    <!-- Textarea inside pill (transparent) -->
+                    <textarea id="inp" rows="1"
+                        placeholder="Pergunte algo ou anexe um arquivo para ensinar a IA"
+                        class="flex-1 text-sm px-2 py-2 leading-relaxed"
+                        style="min-height:36px;max-height:160px;"
+                        onkeydown="onKey(event)" oninput="grow(this)"
+                        onfocus="document.getElementById('inp-box').classList.add('focused')"
+                        onblur="document.getElementById('inp-box').classList.remove('focused')"></textarea>
+                    <!-- Send inside pill -->
+                    <button id="send-btn" onclick="send()"
+                        class="send-btn flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-white" style="margin-bottom:1px;">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 19V5m0 0l-7 7m7-7l7 7"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+</div>
+
+<script>
+//  CONFIG — aponta para o backend FastAPI (necessário para Live Server) 
+const API = 'http://localhost:8000';
+
+//  STATE 
+let session = null, busy = false;
+let queuedFiles = [];
+
+//  ADVANCED PANEL 
+let advOpen = false;
+function toggleAdvanced() {
+    advOpen = !advOpen;
+    document.getElementById('advanced-panel').classList.toggle('hidden', !advOpen);
+    if (advOpen) loadKbStats();
+}
+function switchAdv(tab) {
+    ['pipeline','knowledge'].forEach(t => {
+        document.getElementById('adv-'+t).classList.toggle('hidden', t!==tab);
+        document.getElementById('adv-tab-'+t).className = t===tab
+            ? 'px-5 py-2.5 text-xs font-medium tab-on transition'
+            : 'px-5 py-2.5 text-xs font-medium tab-off transition';
+    });
+    if (tab==='knowledge') loadKbStats();
+}
+
+//  FILE QUEUE 
+function queueFiles(e) {
+    for (const f of e.target.files) queuedFiles.push(f);
+    e.target.value = '';
+    renderFileBar();
+}
+function removeQueued(idx) {
+    queuedFiles.splice(idx, 1);
+    renderFileBar();
+}
+function renderFileBar() {
+    const bar = document.getElementById('file-bar');
+    if (!queuedFiles.length) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    bar.innerHTML = queuedFiles.map((f,i) =>
+        `<span class="file-badge">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            ${f.name}
+            <button onclick="removeQueued(${i})" title="Remover"></button>
+        </span>`
+    ).join('');
+}
+
+//  SEND 
+async function send() {
+    if (busy) return;
+    const txt = document.getElementById('inp').value.trim();
+    const hasFiles = queuedFiles.length > 0;
+    if (!txt && !hasFiles) return;
+
+    document.getElementById('inp').value = '';
+    document.getElementById('inp').style.height = 'auto';
+
+    if (hasFiles) {
+        // Learn from files
+        const filesToSend = [...queuedFiles];
+        queuedFiles = [];
+        renderFileBar();
+        if (txt) addBubble('user', txt);
+        await doLearn(filesToSend, txt);
+    } else {
+        addBubble('user', txt);
+        await doChat(txt);
+    }
+}
+function onKey(e) { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} }
+function grow(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; }
+function sug(btn) { document.getElementById('inp').value=btn.textContent; send(); }
+
+//  CHAT 
+function addBubble(role, content, sources) {
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('msgs');
+    const wrap = document.createElement('div');
+
+    if (role === 'user') {
+        wrap.className = 'flex justify-end msg-in';
+        const b = document.createElement('div');
+        b.className = 'bubble-u max-w-2xl px-5 py-3 rounded-2xl rounded-br-sm text-[15px] leading-relaxed';
+        b.textContent = content;
+        wrap.appendChild(b);
+    } else if (role === 'system') {
+        wrap.className = 'flex justify-center msg-in';
+        const b = document.createElement('div');
+        b.className = 'bubble-sys px-4 py-2 rounded-xl text-xs';
+        b.innerHTML = content;
+        wrap.appendChild(b);
+    } else {
+        wrap.className = 'flex justify-start msg-in';
+        const row = document.createElement('div');
+        row.className = 'flex items-start gap-3 max-w-2xl';
+        const av = document.createElement('img');
+        av.src='/static/avatar_ia.png'; av.alt='IA';
+        av.className='w-8 h-8 rounded-full object-cover avatar-ring flex-shrink-0';
+        av.onerror=function(){
+            this.style.display='none';
+            const fb=document.createElement('div');
+            fb.style.cssText='width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#000;background:linear-gradient(135deg,#00d084,#00a067);';
+            fb.textContent='IA'; this.parentNode.insertBefore(fb,this);
+        };
+        const b = document.createElement('div');
+        b.className = 'bubble-a flex-1 px-5 py-4 rounded-2xl rounded-tl-sm';
+        const txt = document.createElement('div');
+        txt.className = 'md-content';
+        txt.innerHTML = role==='ai-stream' ? '' : md(content||'');
+        b.appendChild(txt);
+        if (sources && sources.length) {
+            const sd=document.createElement('div');
+            sd.style.cssText='margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,208,132,.13);';
+            sd.innerHTML='<p style="font-size:11px;color:rgba(0,208,132,.55);margin-bottom:4px;"> Fontes:</p>'+
+                sources.map(s=>`<span style="display:inline-block;font-size:11px;background:rgba(0,208,132,.08);border:1px solid rgba(0,208,132,.17);color:#5a8a6a;border-radius:4px;padding:1px 8px;margin:2px;">${s}</span>`).join('');
+            b.appendChild(sd);
+        }
+        row.appendChild(av); row.appendChild(b);
+        wrap.appendChild(row);
+        if (role==='ai-stream') return {wrap, txt, av, b};
+    }
+    msgs.appendChild(wrap);
+    msgs.scrollTop=msgs.scrollHeight;
+    return wrap;
+}
+
+async function doChat(text) {
+    const msgs = document.getElementById('msgs');
+    const {wrap, txt, av, b} = addBubble('ai-stream','');
+    txt.className='md-content typing';
+    msgs.appendChild(wrap);
+    msgs.scrollTop=msgs.scrollHeight;
+
+    busy=true; document.getElementById('send-btn').disabled=true;
+    let full='', sources=[];
+
+    try {
+        const resp = await fetch(API+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({message:text,session_id:session})});
+        const reader=resp.body.getReader(), dec=new TextDecoder();
+        let buf='';
+        while(true){
+            const {done,value}=await reader.read(); if(done)break;
+            buf+=dec.decode(value,{stream:true});
+            let idx;
+            while((idx=buf.indexOf('\n\n'))!==-1){
+                const block=buf.slice(0,idx); buf=buf.slice(idx+2);
+                let ev='message',data='';
+                for(const l of block.split('\n')){
+                    if(l.startsWith('event: '))ev=l.slice(7).trim();
+                    else if(l.startsWith('data: '))data=l.slice(6);
+                }
+                if(!data)continue;
+                try{
+                    const p=JSON.parse(data);
+                    if(ev==='token'){full+=p.token;txt.innerHTML=md(full);msgs.scrollTop=msgs.scrollHeight;}
+                    else if(ev==='sources'){sources=p.sources||[];}
+                    else if(ev==='done'){if(p.session_id)session=p.session_id;}
+                    else if(ev==='error'){full+='\n '+(p.error||'Erro'); txt.innerHTML=md(full);}
+                }catch{}
+            }
+        }
+    } catch(err){full=' Erro de conexão: '+err.message; txt.innerHTML=md(full);}
+
+    txt.classList.remove('typing');
+    txt.innerHTML=md(full);
+    av.classList.remove('pring');
+    if(sources.length){
+        const sd=document.createElement('div');
+        sd.style.cssText='margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,208,132,.13);';
+        sd.innerHTML='<p style="font-size:11px;color:rgba(0,208,132,.55);margin-bottom:4px;"> Fontes:</p>'+
+            sources.map(s=>`<span style="display:inline-block;font-size:11px;background:rgba(0,208,132,.08);border:1px solid rgba(0,208,132,.17);color:#5a8a6a;border-radius:4px;padding:1px 8px;margin:2px;">${s}</span>`).join('');
+        b.appendChild(sd);
+    }
+    busy=false; document.getElementById('send-btn').disabled=false;
+    loadSessions();
+}
+
+//  LEARN 
+async function doLearn(files, extraMsg) {
+    document.getElementById('welcome')?.remove();
+    const msgs = document.getElementById('msgs');
+
+    // Build learn card
+    const card = document.createElement('div');
+    card.className = 'flex justify-start msg-in';
+    card.innerHTML = `
+    <div class="flex items-start gap-3 max-w-2xl w-full">
+        <img src="/static/avatar_ia.png" alt="IA" class="w-8 h-8 rounded-full object-cover avatar-ring pring flex-shrink-0"
+             onerror="this.style.display='none'">
+        <div class="bubble-sys flex-1 px-4 py-3 rounded-2xl rounded-tl-sm text-sm">
+            <p class="font-semibold mb-2" style="color:#dce8f5;">
+                 Aprendendo com ${files.map(f=>f.name).join(', ')}
+            </p>
+            <div class="mb-2">
+                <div class="flex justify-between text-xs mb-1" style="color:#6b80a0;">
+                    <span id="lc-label">Enviando arquivo...</span>
+                    <span id="lc-pct" style="color:#00d084;">0%</span>
+                </div>
+                <div class="w-full rounded-full h-1.5" style="background:rgba(0,208,132,.10);">
+                    <div id="lc-bar" class="h-1.5 rounded-full transition-all duration-300" style="width:0%;background:linear-gradient(90deg,#00d084,#00a067);"></div>
+                </div>
+            </div>
+            <div class="learn-step"><span class="dot dot-running" id="ls1"></span><span id="ls1-txt" style="color:#6bb89a;">Recebendo arquivo...</span></div>
+            <div class="learn-step"><span class="dot dot-wait" id="ls2"></span><span id="ls2-txt" style="color:#6b80a0;">Processando documento...</span></div>
+            <div class="learn-step"><span class="dot dot-wait" id="ls3"></span><span id="ls3-txt" style="color:#6b80a0;">Atualizando base de conhecimento...</span></div>
+            <div id="lc-log" class="mt-2 mono text-xs overflow-y-auto" style="max-height:80px;color:#4a7a5a;"></div>
+        </div>
+    </div>`;
+    msgs.appendChild(card);
+    msgs.scrollTop=msgs.scrollHeight;
+
+    const setStep = (n,done)=>{
+        const col = done?'#00d084':'rgba(107,128,160,.35)';
+        const cls = done?'dot-done':'dot-wait';
+        const el = document.getElementById('ls'+n);
+        el.className='dot '+(done?'dot-done':(n<=1?'dot-running':'dot-wait'));
+        el.style.background='';
+    };
+    const setLabel=(txt,pct)=>{
+        document.getElementById('lc-label').textContent=txt;
+        document.getElementById('lc-pct').textContent=pct+'%';
+        document.getElementById('lc-bar').style.width=pct+'%';
+    };
+    const addLog=(msg)=>{
+        const el=document.getElementById('lc-log');
+        el.textContent+=msg+'\n'; el.scrollTop=el.scrollHeight;
+    };
+
+    busy=true; document.getElementById('send-btn').disabled=true;
+
+    try {
+        const form=new FormData();
+        for(const f of files) form.append('files',f);
+
+        const resp=await fetch(API+'/api/learn',{method:'POST',body:form});
+        const reader=resp.body.getReader(), dec=new TextDecoder();
+        let buf='';
+
+        while(true){
+            const {done,value}=await reader.read(); if(done)break;
+            buf+=dec.decode(value,{stream:true});
+            let idx;
+            while((idx=buf.indexOf('\n\n'))!==-1){
+                const block=buf.slice(0,idx); buf=buf.slice(idx+2);
+                let ev='message',data='';
+                for(const l of block.split('\n')){
+                    if(l.startsWith('event: '))ev=l.slice(7).trim();
+                    else if(l.startsWith('data: '))data=l.slice(6);
+                }
+                if(!data)continue;
+                try{
+                    const p=JSON.parse(data);
+                    if(ev==='log') addLog(p.msg||'');
+                    else if(ev==='progress'){
+                        const s=p.step||1, t=p.total||3;
+                        const pct=Math.round((s/t)*100);
+                        setLabel(p.label||'Processando...',pct);
+                        for(let i=1;i<=t;i++){
+                            const dot=document.getElementById('ls'+i);
+                            if(!dot)continue;
+                            if(i<s){dot.className='dot dot-done';}
+                            else if(i===s){dot.className='dot dot-running';}
+                            else{dot.className='dot dot-wait';}
+                        }
+                    }
+                    else if(ev==='error'){
+                        addLog(' '+p.msg);
+                        setLabel('Erro!',100);
+                    }
+                    else if(ev==='done'){
+                        setLabel('Concluído!',100);
+                        ['ls1','ls2','ls3'].forEach(id=>{const e=document.getElementById(id);if(e)e.className='dot dot-done';});
+                        // Show result message in chat
+                        const names=(p.files||files.map(f=>f.name)).join(', ');
+                        addBubble('system',` Aprendizado concluído! Agora já sei sobre <strong>${names}</strong>. Pode me perguntar!`);
+                        updateKbStatus();
+                    }
+                }catch{}
+            }
+        }
+    } catch(err){
+        addLog(' Erro: '+err.message);
+    }
+
+    // avatar stop pulsing
+    card.querySelector('img')?.classList.remove('pring');
+    busy=false; document.getElementById('send-btn').disabled=false;
+
+    if(extraMsg) {
+        setTimeout(()=>doChat(extraMsg), 400);
+    }
+}
+
+//  MARKDOWN  (Gemini-like rendering)
+function md(t){
+    if(!t) return '';
+    t = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Code blocks
+    t = t.replace(/```(\w*)\n?([\s\S]*?)```/g,'<pre><code>$2</code></pre>');
+    // Inline code
+    t = t.replace(/`([^`]+)`/g,'<code>$1</code>');
+    // Bold + italic
+    t = t.replace(/\*\*\*(.+?)\*\*\*/g,'<strong><em>$1</em></strong>');
+    t = t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    t = t.replace(/\*(.+?)\*/g,'<em>$1</em>');
+    // Headings
+    t = t.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+    t = t.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+    t = t.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+    // Horizontal rules
+    t = t.replace(/^-{3,}$/gm,'<hr>');
+    t = t.replace(/^_{3,}$/gm,'<hr>');
+    // Blockquotes
+    t = t.replace(/^&gt; (.+)$/gm,'<blockquote>$1</blockquote>');
+    // Unordered list items
+    t = t.replace(/^[\-\*] (.+)$/gm,'<ul><li>$1</li></ul>');
+    // Ordered list items
+    t = t.replace(/^\d+\. (.+)$/gm,'<ol><li>$1</li></ol>');
+    // Merge adjacent lists
+    t = t.replace(/<\/ul>[\s\n]*<ul>/g,'');
+    t = t.replace(/<\/ol>[\s\n]*<ol>/g,'');
+    // Double newline → paragraph spacer
+    t = t.replace(/\n\n+/g,'<div class="spacer"></div>');
+    // Single newline → line break (but not after block elements)
+    t = t.replace(/\n/g,'<br>');
+    // Clean <br> around block elements
+    t = t.replace(/(<\/h[1-6]>|<\/pre>|<\/ul>|<\/ol>|<hr>|<\/blockquote>)<br>/g,'$1');
+    t = t.replace(/<br>(<h[1-6]>|<pre>|<ul>|<ol>|<hr>|<blockquote>)/g,'$1');
+    t = t.replace(/<div class="spacer"><\/div><br>/g,'<div class="spacer"></div>');
+    t = t.replace(/<br><div class="spacer"><\/div>/g,'<div class="spacer"></div>');
+    return t;
+}
+
+//  SESSION 
+function newChat(){session=null;addWelcome();loadSessions();}
+function addWelcome(){
+    document.getElementById('msgs').innerHTML=`
+    <div id="welcome" class="flex flex-col items-center justify-center h-full text-center px-4">
+        <img src="img/pos_chegada.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
+        <h2 class="text-xl font-bold mb-1.5" style="color:#dce8f5;">Assistente CGR Telecom</h2>
+        <p class="text-sm max-w-sm mx-auto leading-relaxed mb-5" style="color:#6b80a0;">
+            Pergunte sobre protocolos, manuais ou normas.<br>
+            Para <strong style="color:#00d084;">adicionar conhecimento</strong>, clique no 📎 e envie um arquivo.
+        </p>
+        <div id="sug-chips" class="flex flex-wrap gap-2 justify-center">
+            <span class="text-xs" style="color:#3d5070;">Carregando sugestões...</span>
+        </div>
+    </div>`;
+    loadSuggestions();
+}
+
+async function loadSessions(){
+    try{
+        const d=await fetch(API+'/api/chat/sessions').then(r=>r.json());
+        document.getElementById('sess-list').innerHTML=d.sessions.map(s=>`
+        <div class="sess group flex items-center gap-2 px-3 py-2 cursor-pointer ${s.id===session?'on':''}" onclick="loadSess('${s.id}')">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:rgba(0,208,132,.4);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            <span class="flex-1 truncate text-xs" style="color:#a8bbd4;">${s.preview||'Nova conversa'}</span>
+            <button onclick="event.stopPropagation();delSess('${s.id}')"
+                class="opacity-0 group-hover:opacity-100 transition text-sm leading-none" style="color:rgba(248,113,113,.6);"></button>
+        </div>`).join('');
+    }catch{}
+}
+async function loadSess(sid){
+    session=sid;
+    try{
+        const d=await fetch(API+`/api/chat/history/${sid}`).then(r=>r.json());
+        document.getElementById('msgs').innerHTML='';
+        for(const m of d.messages) addBubble(m.role==='assistant'?'ai':'user',m.content);
+        loadSessions();
+    }catch{}
+}
+async function delSess(sid){
+    await fetch(API+`/api/chat/sessions/${sid}`,{method:'DELETE'});
+    if(sid===session) newChat(); else loadSessions();
+}
+
+//  PIPELINE (advanced) 
+async function startPipeline(){
+    const profile=document.getElementById('adv-profile').value;
+    const force=document.getElementById('adv-force').checked;
+    document.getElementById('adv-start').disabled=true;
+    document.getElementById('adv-cancel').disabled=false;
+    document.getElementById('adv-prog').classList.remove('hidden');
+    document.getElementById('adv-log').textContent='';
+    try{
+        await fetch(API+'/api/process',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({profile,force_overwrite:force})});
+        const es=new EventSource(API+'/api/process/logs');
+        es.addEventListener('log',e=>{
+            const l=document.getElementById('adv-log');
+            const m=JSON.parse(e.data).msg+'';
+            l.textContent+=m+'\n'; l.scrollTop=l.scrollHeight;
+        });
+        es.addEventListener('progress',e=>{
+            const p=JSON.parse(e.data);
+            if(p.total){
+                const pct=Math.round((p.done/p.total)*100);
+                document.getElementById('adv-prog-bar').style.width=pct+'%';
+                document.getElementById('adv-prog-pct').textContent=pct+'%';
+                document.getElementById('adv-prog-txt').textContent=`${p.done}/${p.total} arquivos`;
+            }
+        });
+        es.addEventListener('done',()=>{es.close();document.getElementById('adv-start').disabled=false;document.getElementById('adv-cancel').disabled=true;updateKbStatus();});
+        es.onerror=()=>{es.close();document.getElementById('adv-start').disabled=false;document.getElementById('adv-cancel').disabled=true;};
+    }catch(err){
+        document.getElementById('adv-log').textContent+=' '+err.message+'\n';
+        document.getElementById('adv-start').disabled=false;
+        document.getElementById('adv-cancel').disabled=true;
+    }
+}
+async function cancelPipeline(){await fetch(API+'/api/process/cancel',{method:'POST'});}
+async function ingestKnowledge(){
+    try{
+        const d=await fetch(API+'/api/knowledge/ingest',{method:'POST'}).then(r=>r.json());
+        const l=document.getElementById('adv-log');
+        d.logs.forEach(m=>{l.textContent+=m+'\n';});
+        l.scrollTop=l.scrollHeight;
+        loadKbStats();
+    }catch(err){document.getElementById('adv-log').textContent+=' '+err.message+'\n';}
+}
+
+async function loadKbStats(){
+    try{
+        const d=await fetch(API+'/api/knowledge/stats').then(r=>r.json());
+        document.getElementById('stat-chunks').textContent=d.total_chunks;
+        document.getElementById('stat-docs').textContent=d.total_documents;
+        document.getElementById('stat-status').textContent=d.total_chunks>0?'Ativo':'Vazio';
+        document.getElementById('source-list').innerHTML=d.sources.map(s=>
+            `<div style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;background:rgba(0,0,0,.35);border:1px solid rgba(0,208,132,.09);font-size:12px;">
+                <span style="color:#00d084;"></span><span style="color:#a8bbd4;">${s}</span>
+            </div>`).join('');
+    }catch{}
+}
+
+//  STATUS 
+async function checkOllama(){
+    try{
+        const r=await fetch(API+'/api/ollama/status');
+        if(r&&r.ok){
+            const d=await r.json();
+            if(d.status==='connected'){
+                document.getElementById('ol-dot').style.background='#4ade80';
+                document.getElementById('ol-txt').textContent='Ollama: conectado ('+d.models.join(', ')+')';
+            }else throw 0;
+        }else throw 0;
+    }catch{
+        document.getElementById('ol-dot').style.background='#ef4444';
+        document.getElementById('ol-txt').textContent='Ollama: offline';
+    }
+}
+async function updateKbStatus(){
+    try{
+        const d=await fetch(API+'/api/knowledge/stats').then(r=>r.json());
+        const mem = d.total_memories || 0;
+        const sess = d.total_sessions || 0;
+        document.getElementById('kb-txt').textContent=`Base: ${d.total_chunks} chunks / ${d.total_documents} docs / ${mem} memórias / ${sess} conversas`;
+    }catch{document.getElementById('kb-txt').textContent='Base: erro';}
+}
+
+// SUGGESTIONS
+async function loadSuggestions(){
+    const el=document.getElementById('sug-chips');
+    if(!el) return;
+    try{
+        const d=await fetch(API+'/api/suggestions').then(r=>r.json());
+        const items=d.suggestions||[];
+        el.innerHTML=items.map(s=>
+            `<button onclick="sug(this)" class="chip px-4 py-2 rounded-full text-xs" style="color:#a8bbd4;">${s}</button>`
+        ).join('');
+    }catch{
+        el.innerHTML=['Explicar protocolo OSPF','O que é RIP?','Resumo Nokia OLT','Normas CGR Telecom'].map(s=>
+            `<button onclick="sug(this)" class="chip px-4 py-2 rounded-full text-xs" style="color:#a8bbd4;">${s}</button>`
+        ).join('');
+    }
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+    loadSessions(); checkOllama(); updateKbStatus(); loadSuggestions();
+    setInterval(checkOllama,30000); setInterval(updateKbStatus,30000);
+});
+</script>
+</body>
+</html>

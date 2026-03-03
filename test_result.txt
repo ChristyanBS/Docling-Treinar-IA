@@ -1,0 +1,90 @@
+HEALTH: {'status': 'ok'}
+CHAT Status: 200
+  event: token
+  data: {"token": "Ol"}
+  event: token
+  data: {"token": "á"}
+  event: token
+  data: {"token": "!"}
+  event: token
+  data: {"token": " Como"}
+  event: token
+  data: {"token": " pos"}
+  event: token
+  data: {"token": "so"}
+  event: token
+  data: {"token": " ajud"}
+  event: token
+  data: {"token": "ar"}
+  event: token
+  data: {"token": " você"}
+  event: token
+  data: {"token": " hoje"}
+  event: token
+  data: {"token": "?"}
+  event: token
+  data: {"token": " Você"}
+  event: token
+  data: {"token": " precisa"}
+  event: token
+  data: {"token": " de"}
+  event: token
+  data: {"token": " aj"}
+  event: token
+  data: {"token": "uda"}
+  event: token
+  data: {"token": " com"}
+  event: token
+  data: {"token": " alg"}
+  event: token
+  data: {"token": "uma"}
+  event: token
+  data: {"token": " coisa"}
+  event: token
+  data: {"token": " relacion"}
+  event: token
+  data: {"token": "ada"}
+  event: token
+  data: {"token": " à"}
+  event: token
+  data: {"token": " CG"}
+  event: token
+  data: {"token": "R"}
+  event: token
+  data: {"token": " Telecom"}
+  event: token
+  data: {"token": " ou"}
+  event: token
+  data: {"token": " precisa"}
+  event: token
+  data: {"token": " de"}
+  event: token
+  data: {"token": " informações"}
+  event: token
+  data: {"token": " sobre"}
+  event: token
+  data: {"token": " noss"}
+  event: token
+  data: {"token": "os"}
+  event: token
+  data: {"token": " serviços"}
+  event: token
+  data: {"token": "?"}
+  event: token
+  data: {"token": " Est"}
+  event: token
+  data: {"token": "ou"}
+  event: token
+  data: {"token": " aqui"}
+  event: token
+  data: {"token": " para"}
+  event: token
+  data: {"token": " ajud"}
+  event: token
+  data: {"token": "ar"}
+  event: token
+  data: {"token": "!"}
+  event: done
+  data: {"session_id": "0e5e9be573cf"}
+CHAT OK
+SESSIONS: {'sessions': [{'id': '0e5e9be573cf', 'preview': 'Oi'}, {'id': 'abacbe8fb209', 'preview': 'oi'}, {'id': '940f6ba1f362', 'preview': 'Resumo Nokia OLT'}, {'id': 'fc308633f8ca', 'preview': 'O que é RIP?'}, {'id': '1220b205e888', 'preview': 'Oi, tudo bem?'}, {'id': '5a2d5ef0d31d', 'preview': 'Resumo Nokia OLT'}, {'id': '1916e2202311', 'preview': 'oi'}, {'id': '4f395e7f096d', 'preview': 'oi'}, {'id': '1464d8522a53', 'preview': 'O que é RIP?'}, {'id': 'f51d51962a5b', 'preview': 'Resumo Nokia OLT'}, {'id': '330fa0289eae', 'preview': 'O que é RIP?'}, {'id': '45b117dd441a', 'preview': 'Resumo Nokia OLT'}, {'id': '7e7675b73d4c', 'preview': 'O que é RIP?'}, {'id': '8825d03e6bcc', 'preview': 'O que é RIP?'}, {'id': '8cdf6ea27c04', 'preview': 'oi'}, {'id': 'dd75b84c6b35', 'preview': 'O que é RIP?'}, {'id': '1090cbd80cc8', 'preview': 'Explicar protocolo OSPF'}, {'id': '82bf726ac74a', 'preview': 'Explicar protocolo OSPF'}, {'id': '8d54cc4b9ca8', 'preview': 'O que é RIP?'}, {'id': 'cd541a025cea', 'preview': 'O que é RIP?'}, {'id': '3d3de3965644', 'preview': 'oi'}, {'id': '11e4b510e9a6', 'preview': 'Resumo Nokia OLT'}, {'id': '075640167403', 'preview': 'Explicar protocolo OSPF'}, {'id': 'df6025ff1fe5', 'preview': 'O que é RIP?'}, {'id': '2ba7fcd380b9', 'preview': 'Resumo Nokia OLT'}, {'id': '0829b0bc77d9', 'preview': 'oi'}, {'id': '85cfca2901a1', 'preview': 'oi'}, {'id': '849be0c6c89b', 'preview': 'oi'}, {'id': 'c661cc6b91c4', 'preview': 'oi'}, {'id': '0d54bf1b8aa6', 'preview': 'oi'}]}
