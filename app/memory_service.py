@@ -31,7 +31,8 @@ _EXPLICIT_MEMORY = [
     "não esqueça", "nao esqueca", "salva isso", "salve isso",
     "registra isso", "importante:", "nota:",
 ]
-
+# Padrões para nomes (palavras maiúsculas que viçam depois de "sou", "chamo", etc)
+_NAME_PATTERNS = ['chamo', 'sou', 'nome é', 'meu nome', 'é ', 'chamado']
 
 def extract_facts_from_exchange(
     user_msg: str,
@@ -41,17 +42,38 @@ def extract_facts_from_exchange(
     """
     Analisa uma troca user↔assistant e extrai fatos relevantes
     para salvar na memória de longo prazo.
+    
+    Prioriza NOMES para garantir que sejam salvos.
     """
     facts: List[str] = []
     user_lower = user_msg.lower()
 
-    # 1) O usuário pediu explicitamente para lembrar algo?
+    # 1) DETECTAR NOMES ESPECIFICAMENTE
+    # Procurar padrões: "meu nome é X", "me chamo X", "sou X"
+    name_indicators = [
+        'meu nome é', 'me chamo', 'chamo-me', 'me chama', 'me chama de',
+        'eu sou ', 'meu nome:', 'nome é', 'meu nome é:',
+    ]
+    for indicator in name_indicators:
+        if indicator in user_lower:
+            # Extrair o que vem depois do indicador
+            idx = user_lower.find(indicator)
+            after_indicator = user_msg[idx + len(indicator):].strip()
+            # Pegar a primeira "coisa" após o indicador
+            potential_name = after_indicator.split()[0] if after_indicator.split() else ""
+            if potential_name and len(potential_name) > 1:
+                # Salvar de forma que seja fácil encontrar depois
+                facts.append(f"NOME: {potential_name.strip('.,!?')}")
+                facts.append(f"O nome do usuário é {potential_name.strip('.,!?')}")
+                return facts  # Nome é prioridade máxima
+
+    # 2) O usuário pediu explicitamente para lembrar algo?
     for trigger in _EXPLICIT_MEMORY:
         if trigger in user_lower:
             facts.append(f"O usuário pediu para lembrar: {user_msg.strip()}")
             return facts  # Não precisa analisar mais
 
-    # 2) A mensagem contém indicadores de informação útil?
+    # 3) A mensagem contém indicadores de informação útil?
     matched_indicators = []
     for indicator in _FACT_INDICATORS:
         if indicator in user_lower:
@@ -63,25 +85,22 @@ def extract_facts_from_exchange(
         for sentence in sentences:
             sentence_lower = sentence.lower()
             for indicator in matched_indicators:
-                if indicator in sentence_lower and len(sentence.strip()) > 10:
+                if indicator in sentence_lower and len(sentence.strip()) > 5:
                     facts.append(sentence.strip())
                     break  # Evitar duplicar mesma frase
 
-    # 3) Se a mensagem for longa o suficiente e informativa, salvar resumo
-    #    (mensagens acima de 50 chars que não são perguntas simples)
-    if not facts and len(user_msg) > 80:
+    # 4) Se não encontrou fatos com indicadores, mas a mensagem é informativa, salvar como contexto
+    if not facts:
         is_question = user_lower.strip().endswith("?")
-        has_info_words = any(w in user_lower for w in [
-            "é", "são", "está", "funciona", "usa", "preciso",
-            "configurei", "instalei", "mudei", "criei", "fiz",
-        ])
-        if not is_question and has_info_words:
-            # Salvar as primeiras 2 frases como contexto
-            sentences = [s.strip() for s in user_msg.split(".") if len(s.strip()) > 15]
-            for s in sentences[:2]:
-                facts.append(s.strip())
+        # Mensagens que não são só perguntas simples devem ser salvas
+        if not is_question and len(user_msg.strip()) > 10:
+            # Salvar a mensagem inteira como contexto importante
+            facts.append(f"O usuário disse: {user_msg.strip()}")
+        elif len(user_msg.strip()) > 50:
+            # Mesmo que seja pergunta, salvar se for longa (pode conter contexto importante)
+            facts.append(f"O usuário perguntou: {user_msg.strip()}")
 
-    return facts[:5]  # Máximo de 5 fatos por troca
+    return facts[:10]  # Máximo de 10 fatos por troca
 
 
 def store_facts(facts: List[str], session_id: str = "", category: str = "general"):
@@ -113,7 +132,7 @@ def store_facts(facts: List[str], session_id: str = "", category: str = "general
 def get_relevant_memories(query: str, max_results: int = 5) -> List[str]:
     """
     Busca memórias (fatos de conversas anteriores) relevantes para a query.
-    Usa correspondência de palavras-chave.
+    Usa correspondência de palavras-chave e sem semântica inteligente.
     """
     db = SessionLocal()
     try:
@@ -121,18 +140,57 @@ def get_relevant_memories(query: str, max_results: int = 5) -> List[str]:
         if not all_memories:
             return []
 
-        query_words = set(query.lower().split())
-        scored: List[Tuple[int, str]] = []
-
+        query_lower = query.lower()
+        query_words = set(query_lower.split())
+        
+        # Palavras-chave para diferentes tipos de memória
+        personal_keywords = {
+            'nome': ['nome:', 'nome', 'chamo', 'sou', 'chamado', 'meu nome', 'me chama'],
+            'email': ['email', 'mail', '@'],
+            'telefone': ['telefone', 'whatsapp', 'celular', 'fone', 'número'],
+            'trabalho': ['trabalho', 'empresa', 'cargo', 'função', 'profissão'],
+            'localização': ['mora', 'cidade', 'estado', 'endereço', 'local'],
+        }
+        
+        # Verificar que tipo de informação está sendo pedida
+        query_type = 'general'
+        for info_type, keywords in personal_keywords.items():
+            if any(kw in query_lower for kw in keywords):
+                query_type = info_type
+                break
+        
+        scored = []
+        
         for mem in all_memories:
-            mem_words = set(mem.fact.lower().split())
+            mem_fact = mem.fact.lower()
+            
+            # Se está buscando informação pessoal, priorize memórias sobre isso
+            if query_type in personal_keywords:
+                type_keywords = personal_keywords[query_type]
+                # CRÍTICO: Procurar não só as palavras-chave, mas também o padrão "NOME:"
+                if query_type == 'nome':
+                    # Procurar explicitamente por "NOME:" ou "nome:"
+                    if 'nome:' in mem_fact:
+                        scored.append((500, mem.fact))  # Score MÁXIMO
+                        continue
+                
+                # Também procurar por keywords gerais
+                if any(kw in mem_fact for kw in type_keywords):
+                    # Encontrou memória sobre o tipo específico
+                    scored.append((100, mem.fact))  # Score muito alto
+                    continue
+            
+            # Busca geral por palavras-chave
+            mem_words = set(mem_fact.split())
             score = len(query_words.intersection(mem_words))
             if score > 0:
                 scored.append((score, mem.fact))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [fact for _, fact in scored[:max_results]]
-    except Exception:
+        result = [fact for _, fact in scored[:max_results]]
+        return result
+    except Exception as e:
+        print(f"[ERROR] get_relevant_memories falhou: {e}")
         return []
     finally:
         db.close()
@@ -147,9 +205,22 @@ def get_past_conversations_context(
     """
     Busca conversas ANTERIORES relevantes para a query atual.
     Retorna um resumo formatado das conversas passadas relacionadas.
+    
+    NÃO traz conversas antigas quando a pergunta é sobre informações pessoais.
     """
     db = SessionLocal()
     try:
+        # Se a pergunta é sobre informações pessoais, não trazer conversas antigas
+        personal_keywords = ['nome', 'email', 'telefone', 'chamo', 'sou', 'trabalho', 'empresa']
+        query_lower = query.lower()
+        
+        # Checar se é pergunta pessoal
+        is_personal_query = any(kw in query_lower for kw in personal_keywords)
+        
+        # Se é pergunta pessoal, não trazer conversas antigas - só usar memórias diretas
+        if is_personal_query:
+            return ""  # Deixar para as memórias salvas responderem
+        
         # Buscar todas as sessões que NÃO são a sessão atual
         sessions = (
             db.query(ChatSession)
@@ -162,7 +233,7 @@ def get_past_conversations_context(
         if not sessions:
             return ""
 
-        query_words = set(query.lower().split())
+        query_words = set(query_lower.split())
         scored_sessions: List[Tuple[int, str, list]] = []
 
         for sess in sessions:

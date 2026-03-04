@@ -8,84 +8,414 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        *{font-family:'Inter',sans-serif;}code,.mono{font-family:'JetBrains Mono',monospace;}
-        body{background:#050810;overflow:hidden;height:100vh;}
-        #aurora{position:fixed;inset:0;z-index:0;pointer-events:none;
-            background:
-                radial-gradient(ellipse 80% 55% at 50% -5%,rgba(0,190,105,0.20) 0%,transparent 70%),
-                radial-gradient(ellipse 55% 40% at 85% 105%,rgba(0,150,85,0.13) 0%,transparent 60%),
-                radial-gradient(ellipse 45% 35% at 18% 92%,rgba(0,110,65,0.10) 0%,transparent 60%);
-            animation:aur 14s ease-in-out infinite alternate;}
-        @keyframes aur{0%{opacity:1}50%{opacity:.72}100%{opacity:1}}
-        .glass{background:rgba(8,13,26,.76);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
-        .panel{background:rgba(15,23,42,.68);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
-        ::-webkit-scrollbar{width:4px;height:4px;}
-        ::-webkit-scrollbar-track{background:transparent;}
-        ::-webkit-scrollbar-thumb{background:rgba(0,208,132,.22);border-radius:3px;}
-        ::-webkit-scrollbar-thumb:hover{background:rgba(0,208,132,.42);}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-        .msg-in{animation:fadeUp .28s ease-out;}
-        @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
-        .typing::after{content:'|';animation:blink .75s infinite;color:#00d084;margin-left:1px;}
-        @keyframes pring{0%{box-shadow:0 0 0 0 rgba(0,208,132,.55)}70%{box-shadow:0 0 0 8px rgba(0,208,132,0)}100%{box-shadow:0 0 0 0 rgba(0,208,132,0)}}
-        .pring{animation:pring 1.5s infinite;}
-        .bubble-u{background:linear-gradient(135deg,rgba(0,208,132,.20),rgba(0,155,90,.13));border:1px solid rgba(0,208,132,.26);color:#dce8f5;}
-        .bubble-a{background:rgba(15,23,42,.75);border:1px solid rgba(0,208,132,.10);color:#a8bbd4;}
-        .bubble-sys{background:rgba(0,208,132,.06);border:1px solid rgba(0,208,132,.18);color:#6bb89a;}
-        #inp{outline:none;resize:none;background:transparent;border:none;color:#dce8f5;}
-        #inp::placeholder{color:rgba(107,128,160,.55);}
-        #inp-box{background:rgba(15,23,42,.92);border:1px solid rgba(0,208,132,.20);transition:border-color .2s,box-shadow .2s;}
-        #inp-box.focused{border-color:rgba(0,208,132,.55);box-shadow:0 0 0 3px rgba(0,208,132,.09);}
-        .send-btn{background:linear-gradient(135deg,#00d084,#00a067);transition:filter .2s,box-shadow .2s;}
-        .send-btn:hover{filter:brightness(1.14);box-shadow:0 0 18px rgba(0,208,132,.42);}
-        .send-btn:disabled{background:rgba(0,208,132,.12);box-shadow:none;filter:none;cursor:not-allowed;}
-        .attach-btn{color:rgba(0,208,132,.70);transition:color .2s,background .2s;border-radius:.625rem;}
-        .attach-btn:hover{color:#00d084;background:rgba(0,208,132,.10);}
-        .logo-glow{filter:drop-shadow(0 0 10px rgba(0,208,132,.5));}
-        .avatar-ring{box-shadow:0 0 0 2px rgba(0,208,132,.4),0 0 12px rgba(0,208,132,.16);}
-        .chip{border:1px solid rgba(0,208,132,.18);background:rgba(0,208,132,.05);transition:all .2s;}
-        .chip:hover{background:rgba(0,208,132,.13);border-color:rgba(0,208,132,.35);color:#dce8f5;}
-        .sess{border:1px solid transparent;border-radius:.75rem;transition:background .15s,border-color .15s;}
-        .sess.on{background:rgba(0,208,132,.09);border-color:rgba(0,208,132,.22);}
-        .sess:not(.on):hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.07);}
-        .tab-on{color:#00d084;border-bottom:2px solid #00d084;background:rgba(0,208,132,.06);}
-        .tab-off{color:#6b80a0;border-bottom:2px solid transparent;}
-        .tab-off:hover{color:#a8bbd4;background:rgba(255,255,255,.04);}
-        /* Learn card */
-        .learn-step{display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;}
-        .learn-step .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-        .dot-done{background:#00d084;}
-        .dot-running{background:#00d084;animation:pring 1s infinite;}
-        .dot-wait{background:rgba(107,128,160,.35);}
-        #progress-bar{background:linear-gradient(90deg,#00d084,#00a067);}
-        /* File badge */
-        .file-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,208,132,.09);border:1px solid rgba(0,208,132,.22);border-radius:8px;padding:4px 10px;font-size:12px;color:#6bb89a;margin:2px;}
-        .file-badge button{color:rgba(248,113,113,.7);line-height:1;margin-left:2px;font-size:14px;}
-        .file-badge button:hover{color:#f87171;}
-        /* Advanced toggle */
-        #advanced-panel{border-top:1px solid rgba(0,208,132,.10);}
-        /* Constrain chat column so bubbles stay close together */
-        #msgs{display:flex;flex-direction:column;}
-        #msgs>*{width:100%;max-width:760px;margin-left:auto;margin-right:auto;}
-        #msgs>#welcome{max-width:100%;}
-        /* ── Markdown content (Gemini-like readability) ── */
-        .md-content{font-size:15px;line-height:1.8;color:#c8d6e5;}
-        .md-content strong{color:#e8f0fa;font-weight:600;}
-        .md-content em{color:#b0c4de;font-style:italic;}
-        .md-content h1{font-size:21px;font-weight:700;color:#e8f0fa;margin:22px 0 8px;line-height:1.3;}
-        .md-content h2{font-size:18px;font-weight:600;color:#e8f0fa;margin:18px 0 6px;line-height:1.35;padding-bottom:4px;border-bottom:1px solid rgba(0,208,132,.1);}
-        .md-content h3{font-size:16px;font-weight:600;color:#e8f0fa;margin:14px 0 4px;line-height:1.35;}
-        .md-content h1:first-child,.md-content h2:first-child,.md-content h3:first-child{margin-top:0;}
-        .md-content hr{border:none;border-top:1px solid rgba(0,208,132,.13);margin:16px 0;}
-        .md-content ul{list-style:disc;padding-left:22px;margin:8px 0;}
-        .md-content ol{list-style:decimal;padding-left:22px;margin:8px 0;}
-        .md-content li{margin:3px 0;padding-left:2px;}
-        .md-content blockquote{border-left:3px solid rgba(0,208,132,.3);padding:2px 14px;margin:10px 0;color:#7a90a8;font-style:italic;}
-        .md-content pre{background:rgba(0,0,0,.55);border:1px solid rgba(0,208,132,.09);border-radius:10px;padding:14px 16px;margin:12px 0;overflow-x:auto;}
-        .md-content pre code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#5a9a6a;background:none !important;padding:0 !important;border:none !important;border-radius:0 !important;}
-        .md-content code{background:rgba(0,0,0,.45);color:#00d084;border-radius:5px;padding:2px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;}
-        .md-content .spacer{height:12px;}
-    </style>
+    /* Configurações Globais e Variáveis */
+    :root {
+        --brand-green: #00d084;
+        --brand-green-dim: rgba(0, 208, 132, 0.15);
+        --bg-dark: #050810;
+        --panel-bg: rgba(15, 23, 42, 0.72);
+        --text-main: #dce8f5;
+        --text-muted: #94a3b8;
+        --glass-border: rgba(0, 208, 132, 0.2);
+    }
+
+    *{
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    code, .mono {
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    body {
+        background: var(--bg-dark);
+        overflow: hidden;
+        height: 100vh;
+        color: var(--text-main);
+    }
+
+    /* Fundo Aurora - Mais suave e orgânico */
+    #aurora {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: 
+            radial-gradient(circle at 50% -10%, rgba(0, 208, 132, 0.12) 0%, transparent 50%),
+            radial-gradient(circle at 90% 90%, rgba(0, 150, 85, 0.08) 0%, transparent 40%),
+            radial-gradient(circle at 10% 85%, rgba(0, 110, 65, 0.06) 0%, transparent 40%);
+        animation: aur-flow 20s ease-in-out infinite alternate;
+    }
+
+    @keyframes aur-flow {
+        0% { transform: scale(1); opacity: 0.8; }
+        100% { transform: scale(1.1); opacity: 1; }
+    }
+
+    /* Scrollbar Minimalista */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { 
+        background: rgba(255, 255, 255, 0.1); 
+        border-radius: 10px; 
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--brand-green-dim); }
+
+    /* Layout do Chat */
+    #msgs {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        padding: 40px 20px;
+    }
+
+    #msgs > * {
+        width: 100%;
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+        animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Bolhas de Mensagem */
+    .bubble-u {
+        background: linear-gradient(135deg, rgba(0, 208, 132, 0.12) 0%, rgba(0, 155, 90, 0.05) 100%);
+        border: 1px solid var(--glass-border);
+        border-radius: 1.25rem;
+        padding: 14px 20px;
+        align-self: flex-end;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .bubble-a {
+        background: transparent;
+        padding: 10px 0;
+        color: #e2e8f0;
+        line-height: 1.7;
+    }
+
+    /* Markdown & Typography */
+    .md-content {
+        font-size: 16px;
+        letter-spacing: -0.011em;
+    }
+
+    .md-content h2 {
+        font-size: 1.25rem;
+        color: #fff;
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+        font-weight: 600;
+    }
+
+    .md-content p { margin-bottom: 1rem; }
+
+    .md-content code {
+        background: rgba(255, 255, 255, 0.08);
+        color: #4ade80;
+        padding: 0.2em 0.4em;
+        border-radius: 6px;
+        font-size: 0.9em;
+    }
+
+    .md-content pre {
+        background: #0d1117;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        margin: 1.25rem 0;
+        padding: 1rem;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .md-content pre::before {
+        content: "";
+        display: block;
+        height: 12px;
+        width: 100%;
+        background: rgba(255,255,255,0.03);
+        position: absolute;
+        top: 0; left: 0;
+    }
+
+    /* Caixa de Entrada (Input) */
+    #inp-container {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 20px;
+        background: linear-gradient(to top, var(--bg-dark) 60%, transparent);
+        z-index: 10;
+    }
+
+    #inp-box {
+        max-width: 760px;
+        margin: 0 auto;
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 24px;
+        padding: 12px 16px;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+    }
+
+    #inp-box.focused {
+        border-color: rgba(0, 208, 132, 0.4);
+        background: rgba(30, 41, 59, 0.9);
+        box-shadow: 0 0 0 4px rgba(0, 208, 132, 0.05), 0 20px 25px -5px rgba(0,0,0,0.2);
+    }
+
+    #inp {
+        width: 100%;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #fff;
+        font-size: 15px;
+        padding: 8px 4px;
+        line-height: 1.5;
+        max-height: 200px;
+    }
+
+    /* Botões */
+    .send-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: var(--brand-green);
+        color: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+        margin-bottom: 2px;
+    }
+
+    .send-btn:hover:not(:disabled) {
+        transform: scale(1.05);
+        filter: brightness(1.1);
+        box-shadow: 0 0 15px rgba(0, 208, 132, 0.3);
+    }
+
+    .send-btn:disabled {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.3);
+        cursor: not-allowed;
+    }
+
+    /* Chips e Badges */
+    .chip {
+        padding: 6px 14px;
+        border-radius: 100px;
+        font-size: 13px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        cursor: pointer;
+        transition: all 0.2s;
+        color: var(--text-muted);
+    }
+
+    .chip:hover {
+        background: var(--brand-green-dim);
+        border-color: var(--brand-green);
+        color: var(--brand-green);
+    }
+
+    /* Animação de Digitação */
+    .typing::after {
+        content: '●';
+        font-size: 10px;
+        margin-left: 4px;
+        color: var(--brand-green);
+        animation: blink 1s infinite;
+    }
+
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Transição para deletar sessão */
+    .sess {
+        transition: all 0.3s ease;
+    }
+
+    .sess.fade-out {
+        opacity: 0;
+        transform: translateX(-20px);
+        pointer-events: none;
+    }
+
+    /* ── MODAL DE NOME ── */
+    #name-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 8, 16, 0.95);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+        animation: fadeIn 0.3s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    #name-modal.hidden {
+        display: none;
+    }
+
+    .name-modal-card {
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(25, 35, 60, 0.85) 100%);
+        border: 2px solid rgba(0, 208, 132, 0.3);
+        border-radius: 28px;
+        padding: 48px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 40px rgba(0, 208, 132, 0.1);
+        animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+        from { 
+            transform: translateY(40px);
+            opacity: 0;
+        }
+        to { 
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    .name-modal-header {
+        margin-bottom: 32px;
+        text-align: center;
+    }
+
+    .name-modal-header h1 {
+        font-size: 28px;
+        font-weight: 700;
+        color: #dce8f5;
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
+    }
+
+    .name-modal-header p {
+        font-size: 14px;
+        color: #6b80a0;
+        line-height: 1.6;
+    }
+
+    .name-modal-logo {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 20px;
+    }
+
+    .name-modal-logo img {
+        height: 56px;
+        width: auto;
+        filter: drop-shadow(0 0 10px rgba(0, 208, 132, 0.2));
+    }
+
+    .name-input-group {
+        margin-bottom: 24px;
+    }
+
+    .name-input-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: #a8bbd4;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .name-input-group input {
+        width: 100%;
+        padding: 14px 18px;
+        background: rgba(30, 41, 59, 0.6);
+        border: 1.5px solid rgba(0, 208, 132, 0.25);
+        border-radius: 14px;
+        font-size: 16px;
+        color: #dce8f5;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.3s ease;
+    }
+
+    .name-input-group input::placeholder {
+        color: rgba(107, 128, 160, 0.5);
+    }
+
+    .name-input-group input:focus {
+        outline: none;
+        border-color: rgba(0, 208, 132, 0.6);
+        background: rgba(30, 41, 59, 0.9);
+        box-shadow: 0 0 0 4px rgba(0, 208, 132, 0.1);
+    }
+
+    .name-modal-buttons {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-direction: column;
+    }
+
+    .name-modal-buttons button {
+        padding: 13px 32px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+        letter-spacing: 0.3px;
+    }
+
+    .name-save-btn {
+        background: linear-gradient(135deg, #00d084 0%, #00a067 100%);
+        color: #000;
+        width: 100%;
+    }
+
+    .name-save-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0, 208, 132, 0.3);
+    }
+
+    .name-save-btn:active {
+        transform: translateY(0);
+    }
+
+    .name-skip-btn {
+        background: rgba(0, 208, 132, 0.08);
+        color: #00d084;
+        border: 1px solid rgba(0, 208, 132, 0.2);
+        width: 100%;
+    }
+
+    .name-skip-btn:hover {
+        background: rgba(0, 208, 132, 0.15);
+        border-color: rgba(0, 208, 132, 0.4);
+    }
+
+    
+</style>
 </head>
 <body>
 <div id="aurora"></div>
@@ -95,7 +425,7 @@
 <!--  SIDEBAR  -->
 <aside class="w-64 glass flex flex-col flex-shrink-0" style="border-right:1px solid rgba(0,208,132,.11);">
     <div class="flex items-center justify-center py-5 px-4" style="border-bottom:1px solid rgba(0,208,132,.12);">
-        <img src="app\static\img\logo.gif" alt="Logo" class="logo-glow logoheader" title="Home" style="height:48px;width:auto;display:block;">
+        <img src="/static/img/logo.gif" alt="Logo" class="logo-glow logoheader" title="Home" style="height:48px;width:auto;display:block;">
     </div>
 
     <div class="px-3 pt-3 pb-2">
@@ -148,7 +478,7 @@
         </div>
 
         <!-- Pipeline sub-panel -->
-        <div id="adv-pipeline" class="p-4 grid grid-cols-2 gap-4" style="max-height:220px;overflow-y:auto;">
+        <div id="adv-pipeline" class="p-4 grid grid-cols-2 gap-4" style="overflow-y:auto;">
             <div class="panel rounded-xl p-4" style="border:1px solid rgba(0,208,132,.12);">
                 <h4 class="text-xs font-semibold mb-3 flex items-center gap-1" style="color:#dce8f5;"> Pipeline Manual</h4>
                 <div class="flex gap-2 mb-3 flex-wrap">
@@ -186,7 +516,7 @@
         </div>
 
         <!-- Knowledge sub-panel -->
-        <div id="adv-knowledge" class="p-4 hidden" style="max-height:220px;overflow-y:auto;">
+        <div id="adv-knowledge" class="p-4 hidden" style="overflow-y:auto;">
             <div class="panel rounded-xl p-4" style="border:1px solid rgba(0,208,132,.12);">
                 <div class="grid grid-cols-3 gap-3 mb-4">
                     <div class="rounded-lg p-3 text-center" style="background:rgba(0,0,0,.4);border:1px solid rgba(0,208,132,.12);">
@@ -209,10 +539,35 @@
 
     <!--  CHAT  -->
     <div class="flex-1 flex flex-col min-h-0">
+        <!-- Modal de Nome -->
+        <div id="name-modal" class="hidden">
+            <div class="name-modal-card">
+                <div class="name-modal-header">
+                    <div class="name-modal-logo">
+                        <img src="/static/img/logo.gif" alt="CGR Telecom">
+                    </div>
+                    <h1>Bem-vindo!</h1>
+                    <p>Como você gostaria de ser chamado?</p>
+                </div>
+                <div class="name-input-group">
+                    <label for="user-name-input">Seu Nome</label>
+                    <input 
+                        id="user-name-input" 
+                        type="text" 
+                        placeholder="Digite seu nome..." 
+                        onkeypress="if(event.key==='Enter') saveUserName()">
+                </div>
+                <div class="name-modal-buttons">
+                    <button class="name-save-btn" onclick="saveUserName()">Confirmar</button>
+                    <button class="name-skip-btn" onclick="skipNameModal()">Continuar sem informar</button>
+                </div>
+            </div>
+        </div>
+
         <div id="msgs" class="flex-1 overflow-y-auto py-6 space-y-4" style="padding-left:16px;padding-right:16px;">
             <!-- Welcome -->
             <div id="welcome" class="flex flex-col items-center justify-center h-full text-center px-4">
-                <img src="app\static\img\logo.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
+                <img src="/static/img/logo.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
                 <h2 class="text-xl font-bold mb-1.5" style="color:#dce8f5;">Assistente CGR Telecom</h2>
                 <p class="text-sm max-w-sm mx-auto leading-relaxed mb-5" style="color:#6b80a0;">
                     Pergunte sobre protocolos, manuais ou normas.<br>
@@ -349,9 +704,23 @@ function addBubble(role, content, sources) {
     if (role === 'user') {
         wrap.className = 'flex justify-end msg-in';
         const b = document.createElement('div');
-        b.className = 'bubble-u max-w-2xl px-5 py-3 rounded-2xl rounded-br-sm text-[15px] leading-relaxed';
-        b.textContent = content;
+        b.className = 'bubble-u max-w-2xl px-5 py-3 rounded-2xl rounded-br-sm text-[15px] leading-relaxed flex items-end gap-2';
+        const txt = document.createElement('span');
+        txt.textContent = content;
+        txt.style.flex = '1';
+        b.appendChild(txt);
+        
+        // Add save indicator
+        const savedIcon = document.createElement('span');
+        savedIcon.innerHTML = '✓';
+        savedIcon.style.cssText = 'color:rgba(0,208,132,.6);font-size:14px;font-weight:bold;flex-shrink:0;opacity:0;transition:opacity 0.3s;margin-left:4px;';
+        b.appendChild(savedIcon);
         wrap.appendChild(b);
+        
+        // Show save indicator after a moment
+        setTimeout(() => {
+            savedIcon.style.opacity = '1';
+        }, 200);
     } else if (role === 'system') {
         wrap.className = 'flex justify-center msg-in';
         const b = document.createElement('div');
@@ -404,8 +773,14 @@ async function doChat(text) {
     let full='', sources=[];
 
     try {
+        console.log('Enviando para:', API+'/api/chat', {message:text,session_id:session});
         const resp = await fetch(API+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({message:text,session_id:session})});
+        
+        if (!resp.ok) {
+            throw new Error(`Erro HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        
         const reader=resp.body.getReader(), dec=new TextDecoder();
         let buf='';
         while(true){
@@ -426,10 +801,14 @@ async function doChat(text) {
                     else if(ev==='sources'){sources=p.sources||[];}
                     else if(ev==='done'){if(p.session_id)session=p.session_id;}
                     else if(ev==='error'){full+='\n '+(p.error||'Erro'); txt.innerHTML=md(full);}
-                }catch{}
+                }catch(e){console.error('Erro parseando JSON:', e, data);}
             }
         }
-    } catch(err){full=' Erro de conexão: '+err.message; txt.innerHTML=md(full);}
+    } catch(err){
+        console.error('Erro no chat:', err);
+        full=' Erro de conexão: '+err.message; 
+        txt.innerHTML=md(full);
+    }
 
     txt.classList.remove('typing');
     txt.innerHTML=md(full);
@@ -601,12 +980,84 @@ function md(t){
     return t;
 }
 
+//  NOME DO USUÁRIO
+let userDisplayName = "";
+
+function showNameModal() {
+    document.getElementById('name-modal').classList.remove('hidden');
+    document.getElementById('user-name-input').focus();
+}
+
+function hideNameModal() {
+    document.getElementById('name-modal').classList.add('hidden');
+}
+
+function saveUserName() {
+    const name = document.getElementById('user-name-input').value.trim();
+    if (!name) {
+        alert('Por favor, digite um nome');
+        return;
+    }
+    
+    console.log('🔵 [NOME] Iniciando salvamento de nome: ' + name);
+    
+    userDisplayName = name;
+    
+    // Criar uma nova sessão se não existir
+    if (!session) {
+        session = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        console.log('🔵 [NOME] Nova sessão criada: ' + session);
+    }
+    
+    // Salvar o nome
+    const payload = {
+        fact: `NOME: ${name}`,
+        session_id: session,
+        category: 'personal'
+    };
+    
+    console.log('🔵 [NOME] Enviando para o servidor:', payload);
+    
+    fetch(API + '/api/memory/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(r => {
+        console.log('🔵 [NOME] Status HTTP:', r.status);
+        return r.json();
+    })
+    .then(d => {
+        console.log('✅ [NOME] Resposta do servidor:', d);
+        hideNameModal();
+        loadSessions();
+    })
+    .catch(err => {
+        console.error('❌ [NOME] Erro:', err);
+        hideNameModal();
+    });
+}
+
+function skipNameModal() {
+    console.log('⏭️ [NOME] Pulando modal de nome');
+    if (!session) {
+        session = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    hideNameModal();
+    loadSessions();
+}
+
 //  SESSION 
-function newChat(){session=null;addWelcome();loadSessions();}
+function newChat(){
+    session=null;
+    addWelcome();
+    loadSessions();
+    setTimeout(() => showNameModal(), 300);
+}
 function addWelcome(){
     document.getElementById('msgs').innerHTML=`
     <div id="welcome" class="flex flex-col items-center justify-center h-full text-center px-4">
-        <img src="app\static\img\pos_chegada.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
+        <img src="/static/img/pos_chegada.gif" alt="Logo" class="logo-glow logoheader mb-5" title="Home" style="height:64px;width:auto;display:block;margin:0 auto;">
         <h2 class="text-xl font-bold mb-1.5" style="color:#dce8f5;">Assistente CGR Telecom</h2>
         <p class="text-sm max-w-sm mx-auto leading-relaxed mb-5" style="color:#6b80a0;">
             Pergunte sobre protocolos, manuais ou normas.<br>
@@ -623,13 +1074,17 @@ async function loadSessions(){
     try{
         const d=await fetch(API+'/api/chat/sessions').then(r=>r.json());
         document.getElementById('sess-list').innerHTML=d.sessions.map(s=>`
-        <div class="sess group flex items-center gap-2 px-3 py-2 cursor-pointer ${s.id===session?'on':''}" onclick="loadSess('${s.id}')">
+        <div class="sess group flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg transition-colors hover:bg-opacity-50" data-sid="${s.id}" style="background:${s.id===session?'rgba(0,208,132,.12)':'transparent'}" onclick="loadSess('${s.id}')">
             <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:rgba(0,208,132,.4);">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
             </svg>
             <span class="flex-1 truncate text-xs" style="color:#a8bbd4;">${s.preview||'Nova conversa'}</span>
-            <button onclick="event.stopPropagation();delSess('${s.id}')"
-                class="opacity-0 group-hover:opacity-100 transition text-sm leading-none" style="color:rgba(248,113,113,.6);"></button>
+            <button onclick="event.stopPropagation();delSess('${s.id}')" title="Deletar conversa"
+                class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-red-500/20 active:bg-red-500/30" style="color:rgba(248,113,113,.7);">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-9l-1 1H5v2h14V4z"/>
+                </svg>
+            </button>
         </div>`).join('');
     }catch{}
 }
@@ -643,8 +1098,14 @@ async function loadSess(sid){
     }catch{}
 }
 async function delSess(sid){
-    await fetch(API+`/api/chat/sessions/${sid}`,{method:'DELETE'});
-    if(sid===session) newChat(); else loadSessions();
+    const elem = document.querySelector(`.sess[data-sid="${sid}"]`);
+    if (elem) {
+        elem.classList.add('fade-out');
+    }
+    setTimeout(async () => {
+        await fetch(API+`/api/chat/sessions/${sid}`,{method:'DELETE'});
+        if(sid===session) newChat(); else loadSessions();
+    }, 300);
 }
 
 //  PIPELINE (advanced) 
@@ -750,6 +1211,10 @@ async function loadSuggestions(){
 document.addEventListener('DOMContentLoaded',()=>{
     loadSessions(); checkOllama(); updateKbStatus(); loadSuggestions();
     setInterval(checkOllama,30000); setInterval(updateKbStatus,30000);
+    // Mostrar modal na primeira vez que abre
+    if (!session) {
+        setTimeout(() => showNameModal(), 500);
+    }
 });
 </script>
 </body>

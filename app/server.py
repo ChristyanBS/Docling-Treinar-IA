@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
 
 from app.database import (
     Base, ChatMemory, ChatMessage, ChatSession, Document, KnowledgeChunk,
@@ -53,6 +54,11 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Mount static files
+static_dir = os.path.join(BASE_DIR, "app", "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # ── Estado do pipeline (simplificado) ────────────────────────────
 _pipeline_running = False
@@ -187,31 +193,33 @@ async def chat(req: ChatRequest):
 
     # ── Montar system prompt com tudo ────────────────────────────
     sys_prompt = (
-        "Você é um assistente inteligente da CGR Telecom. "
-        "Responda em português brasileiro de forma clara e completa.\n\n"
-        "REGRA IMPORTANTE: Você tem memória de longo prazo. Você DEVE usar as "
-        "informações das memórias e conversas anteriores ao responder. "
-        "Se o usuário perguntar algo que já foi discutido ou informado antes, "
-        "responda com base nessas memórias. Priorize as memórias sobre contexto "
-        "de documentos quando forem sobre informações pessoais do usuário."
+        "Você é um assistente inteligente da CGR Telecom que mantém memória do usuário.\n\n"
+        "⚠️ INSTRUÇÕES CRÍTICAS:\n"
+        "1. As informações marcadas como 'MEMÓRIAS SALVAS' são fatos sobre o usuário.\n"
+        "2. Use-as SEMPRE que o usuário perguntar algo relacionado.\n"
+        "3. Se há memória sobre o nome do usuário e ele pergunta 'Qual é meu nome?', "
+        "responda SOMENTE com o nome salvo. Não diga 'não sei' ou 'não tenho informação'.\n"
+        "4. Para informações pessoais (nome, email, telefone), ignore perguntas sobre documentos "
+        "e use APENAS as memórias salvas.\n\n"
     )
 
     if all_memories_text.strip():
         sys_prompt += (
-            "\n\n🧠 MEMÓRIAS SALVAS (informações que o usuário já compartilhou — "
-            "USE estas informações nas suas respostas):\n"
-            + all_memories_text.strip()
+            "📝 MEMÓRIAS DO USUÁRIO:\n"
+            + all_memories_text.strip() + "\n\n"
         )
+    else:
+        sys_prompt += "📝 MEMÓRIAS DO USUÁRIO: (nenhuma salva ainda)\n\n"
 
     if past_convs:
         sys_prompt += (
-            "\n\n💬 CONVERSAS ANTERIORES RELEVANTES:\n"
-            + past_convs
+            "📋 HISTÓRICO (conversas anteriores relacionadas):\n"
+            + past_convs + "\n\n"
         )
 
     if doc_context:
         sys_prompt += (
-            "\n\n📚 CONTEXTO DOS DOCUMENTOS TREINADOS:\n"
+            "📚 DOCUMENTOS TREINADOS:\n"
             + doc_context
         )
 
@@ -464,6 +472,33 @@ async def delete_memory(mem_id: int):
         raise HTTPException(500, str(e))
     finally:
         db.close()
+
+
+# ── Salvar memória diretamente (para nome do usuário no modal) ──
+class MemorySaveRequest(BaseModel):
+    fact: str
+    session_id: str = ""
+    category: str = "personal"
+
+
+@app.post("/api/memory/save")
+async def save_memory(req: MemorySaveRequest):
+    from app.memory_service import store_facts
+    try:
+        if not req.fact or not req.session_id:
+            raise HTTPException(400, "fact e session_id são obrigatórios")
+        
+        print(f"📨 [MEMORY SAVE] Recebido: fact='{req.fact}', session_id='{req.session_id}', category='{req.category}'")
+        store_facts([req.fact], session_id=req.session_id, category=req.category)
+        print(f"✅ [MEMORY SAVE] Salvo com sucesso!")
+        return {"ok": True, "message": "Memória salva com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [MEMORY SAVE] Erro: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Erro ao salvar memória: {str(e)}")
 
 
 @app.post("/api/knowledge/ingest")
