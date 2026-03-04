@@ -5,6 +5,8 @@ Armazena tudo no SQLite (documents + knowledge_chunks) para persistência.
 
 import os
 import json
+import numpy as np
+from sentence_transformers import SentenceTransformer
 from typing import List
 from app.database import SessionLocal, Document, KnowledgeChunk, TrainingStatus
 
@@ -230,3 +232,5 @@ def delete_document(doc_id: int) -> bool:
         return False
     finally:
         db.close()
+
+        

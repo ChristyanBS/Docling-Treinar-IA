@@ -150,20 +150,7 @@ async def chat(req: ChatRequest):
             sess = ChatSession(id=session_id, preview=req.message[:80])
             db.add(sess)
             db.commit()
-
-        # Salvar mensagem do usuário
-        db.add(ChatMessage(session_id=session_id, role="user", content=req.message))
-        db.commit()
-
-        # Buscar histórico da sessão atual
-        history_msgs = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
-            .all()
-        )
-        history_data = [(m.role, m.content) for m in history_msgs]
-
+            
         db.close()
     except Exception as e:
         try:
@@ -230,9 +217,8 @@ async def chat(req: ChatRequest):
 
     messages = [{"role": "system", "content": sys_prompt}]
 
-    # Adicionar últimas 20 mensagens do histórico da sessão atual
-    for role, content in history_data[-20:]:
-        messages.append({"role": role, "content": content})
+    # Adicionar a pergunta atual do usuário
+    messages.append({"role": "user", "content": req.message})
 
     # Identificar fontes de documentos
     sources = []
@@ -254,13 +240,19 @@ async def chat(req: ChatRequest):
             if sources:
                 yield _sse("sources", {"sources": sources})
 
-            async for token in chat_stream(messages):
+            # Passa o session_id para o chat_stream para que ele possa buscar o histórico
+            async for token in chat_stream(messages, session_id=session_id):
                 full_response += token
                 yield _sse("token", {"token": token})
 
-            # Salvar resposta + extrair fatos para memória
+            # Salvar MENSAGEM DO USUÁRIO, resposta e extrair fatos para memória
             db2 = SessionLocal()
             try:
+                # Salva a mensagem do usuário que iniciou esta troca
+                db2.add(ChatMessage(
+                    session_id=session_id, role="user", content=user_message
+                ))
+                # Salva a resposta do assistente
                 db2.add(ChatMessage(
                     session_id=session_id, role="assistant", content=full_response
                 ))
