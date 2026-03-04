@@ -5,9 +5,8 @@ Serviço de comunicação com o Ollama — inclui streaming token-a-token.
 import httpx
 import json
 from typing import Optional, List, AsyncGenerator
+from app.config import OLLAMA_BASE_URL, CHAT_MODEL
 from app.database import SessionLocal, ChatMessage
-
-OLLAMA_BASE_URL = "http://localhost:11434"
 
 
 def get_history_messages(session_id: str, limit: int = 10) -> List[dict]:
@@ -54,7 +53,7 @@ async def list_models() -> List[str]:
 async def chat_stream(
     messages: List[dict],
     session_id: str,
-    model: str = "llama3.2",
+    model: str = CHAT_MODEL,
 ) -> AsyncGenerator[str, None]:
     """Stream tokens from Ollama chat API, injetando histórico da sessão."""
     # Injeta o histórico da conversa antes da última mensagem do usuário

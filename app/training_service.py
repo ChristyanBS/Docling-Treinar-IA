@@ -1,20 +1,19 @@
 """
 Serviço de processamento e treinamento com documentos.
-Armazena tudo no SQLite (documents + knowledge_chunks) para persistência.
+Armazena tudo no PostgreSQL (documents + knowledge_chunks) com embeddings pgvector.
 """
 
+import logging
 import os
-import json
-import numpy as np
-from sentence_transformers import SentenceTransformer
 from typing import List
-from app.database import SessionLocal, Document, KnowledgeChunk, TrainingStatus
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
-CHUNKS_DIR = os.path.join(BASE_DIR, "data", "chunks")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(CHUNKS_DIR, exist_ok=True)
+from sqlalchemy import text as sa_text
+
+from app.config import UPLOAD_DIR, CHUNKS_DIR
+from app.database import SessionLocal, Document, KnowledgeChunk, TrainingStatus
+from app.embedding_service import embed_texts, embed_single
+
+logger = logging.getLogger(__name__)
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
@@ -69,13 +68,12 @@ def extract_text_from_file(filepath: str) -> str:
 
 
 def process_and_store_document(filepath: str, filename: str) -> dict:
-    """Processa documento: extrai texto, cria chunks e salva TUDO no SQLite."""
+    """Processa documento: extrai texto, cria chunks com embeddings e salva no PostgreSQL."""
     db = SessionLocal()
     try:
         # Verificar se já existe
         existing = db.query(Document).filter(Document.filename == filename).first()
         if existing:
-            # Remover antigo para reprocessar
             db.delete(existing)
             db.commit()
 
@@ -111,20 +109,25 @@ def process_and_store_document(filepath: str, filename: str) -> dict:
             doc_type=doc_type, chunks_count=len(chunks)
         )
         db.add(document)
-        db.flush()  # Para obter o ID
+        db.flush()
 
-        # Salvar CADA chunk no SQLite (tabela knowledge_chunks)
-        for i, chunk_text in enumerate(chunks):
+        # Gerar embeddings para todos os chunks de uma vez (batch)
+        logger.info("Gerando embeddings para %d chunks de %s", len(chunks), filename)
+        embeddings = embed_texts(chunks)
+
+        # Salvar CADA chunk no PostgreSQL com embedding
+        for i, (chunk_text, emb) in enumerate(zip(chunks, embeddings)):
             chunk_obj = KnowledgeChunk(
                 document_id=document.id,
                 chunk_index=i,
                 content=chunk_text,
                 source=filename,
+                embedding=emb,
             )
             db.add(chunk_obj)
 
         status.status = "done"
-        status.message = f"{len(chunks)} chunks salvos no banco"
+        status.message = f"{len(chunks)} chunks salvos com embeddings"
         db.commit()
 
         return {
@@ -136,22 +139,51 @@ def process_and_store_document(filepath: str, filename: str) -> dict:
         }
     except Exception as e:
         db.rollback()
+        logger.error("Erro ao processar %s: %s", filename, e)
         return {"success": False, "error": str(e)}
     finally:
         db.close()
 
 
 def get_relevant_context(query: str, max_chunks: int = 8) -> str:
-    """Busca chunks relevantes DIRETAMENTE do banco SQLite."""
+    """
+    Busca chunks relevantes usando busca vetorial (cosine distance) no pgvector.
+    Faz fallback para busca por palavras-chave se não houver embeddings.
+    """
     db = SessionLocal()
     try:
+        # ── 1) Busca vetorial ────────────────────────────────────
+        query_emb = embed_single(query)
+        has_embedding = any(v != 0.0 for v in query_emb)
+
+        if has_embedding:
+            # Busca por cosine distance (operador <=>) no pgvector
+            results = db.execute(
+                sa_text("""
+                    SELECT content, source, embedding <=> :qvec AS dist
+                    FROM knowledge_chunks
+                    WHERE embedding IS NOT NULL
+                    ORDER BY dist ASC
+                    LIMIT :lim
+                """),
+                {"qvec": str(query_emb), "lim": max_chunks},
+            ).fetchall()
+
+            if results:
+                parts = []
+                for content, source, dist in results:
+                    if dist < 0.85:  # threshold de relevância
+                        parts.append(f"[Fonte: {source}]\n{content}")
+                if parts:
+                    return "\n\n---\n\n".join(parts)
+
+        # ── 2) Fallback: busca por palavras-chave ────────────────
         all_chunks = db.query(KnowledgeChunk).all()
         if not all_chunks:
             return ""
 
         query_words = set(query.lower().split())
         scored = []
-
         for chunk in all_chunks:
             chunk_words = set(chunk.content.lower().split())
             score = len(query_words.intersection(chunk_words))
@@ -161,16 +193,16 @@ def get_relevant_context(query: str, max_chunks: int = 8) -> str:
         scored.sort(key=lambda x: x[0], reverse=True)
 
         parts = []
-        for score, text, source in scored[:max_chunks]:
-            parts.append(f"[Fonte: {source}]\n{text}")
+        for score, text_content, source in scored[:max_chunks]:
+            parts.append(f"[Fonte: {source}]\n{text_content}")
 
-        # Se nenhum match por palavras-chave, pegar os primeiros chunks
         if not parts and all_chunks:
             for chunk in all_chunks[:3]:
                 parts.append(f"[Fonte: {chunk.source}]\n{chunk.content}")
 
         return "\n\n---\n\n".join(parts)
-    except Exception:
+    except Exception as e:
+        logger.error("Erro em get_relevant_context: %s", e)
         return ""
     finally:
         db.close()
@@ -218,11 +250,9 @@ def delete_document(doc_id: int) -> bool:
     try:
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if doc:
-            # Remover upload
             upload_path = os.path.join(UPLOAD_DIR, doc.filename)
             if os.path.exists(upload_path):
                 os.remove(upload_path)
-            # O cascade deleta os KnowledgeChunks automaticamente
             db.delete(doc)
             db.commit()
             return True
@@ -233,4 +263,38 @@ def delete_document(doc_id: int) -> bool:
     finally:
         db.close()
 
-        
+
+def backfill_embeddings(batch_size: int = 32) -> dict:
+    """
+    Gera embeddings para chunks que ainda não possuem (embedding IS NULL).
+    Útil após migração de dados antigos do SQLite.
+    """
+    db = SessionLocal()
+    try:
+        pending = db.query(KnowledgeChunk).filter(
+            KnowledgeChunk.embedding.is_(None)
+        ).all()
+
+        if not pending:
+            return {"updated": 0, "message": "Todos os chunks já possuem embeddings."}
+
+        total = len(pending)
+        updated = 0
+
+        for i in range(0, total, batch_size):
+            batch = pending[i:i + batch_size]
+            texts = [c.content for c in batch]
+            embeddings = embed_texts(texts)
+            for chunk, emb in zip(batch, embeddings):
+                chunk.embedding = emb
+                updated += 1
+            db.commit()
+            logger.info("Backfill: %d/%d chunks atualizados", updated, total)
+
+        return {"updated": updated, "message": f"{updated} chunks atualizados com embeddings."}
+    except Exception as e:
+        db.rollback()
+        logger.error("Erro no backfill: %s", e)
+        return {"updated": 0, "error": str(e)}
+    finally:
+        db.close()

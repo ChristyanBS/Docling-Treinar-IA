@@ -19,9 +19,10 @@ from app.database import (
     Base, ChatMemory, ChatMessage, ChatSession, Document, KnowledgeChunk,
     SessionLocal, TrainingStatus, init_db, new_id,
 )
+from app.config import BASE_DIR, UPLOAD_DIR, CHUNKS_DIR
 from app.ollama_service import check_ollama_status, chat_stream, list_models
 from app.training_service import (
-    CHUNKS_DIR, UPLOAD_DIR,
+    backfill_embeddings,
     delete_document,
     extract_text_from_file,
     get_all_documents,
@@ -31,6 +32,7 @@ from app.training_service import (
     split_text_into_chunks,
 )
 from app.memory_service import (
+    backfill_memory_embeddings,
     extract_facts_from_exchange,
     get_past_conversations_context,
     get_recent_memories_summary,
@@ -40,7 +42,7 @@ from app.memory_service import (
 
 # ── Inicialização ────────────────────────────────────────────────
 init_db()
-app = FastAPI(title="Docling IA Trainer", version="3.1.0")
+app = FastAPI(title="Assistente CGR — Redes & Telecom", version="4.0.0")
 
 # CORS — permite Live Server (5500) e qualquer origem em dev
 app.add_middleware(
@@ -51,8 +53,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── Estado do pipeline (simplificado) ────────────────────────────
 _pipeline_running = False
@@ -117,7 +117,12 @@ async def suggestions():
     finally:
         db.close()
 
-    base = ["Explicar protocolo OSPF", "O que é RIP?", "Resumo Nokia OLT"]
+    base = [
+        "Configurar VLAN em switch Nokia",
+        "Explicar protocolo OSPF",
+        "Provisionar ONT na OLT",
+        "O que é GPON?",
+    ]
     for n in names[:3]:
         base.append(f"Resumo de {n}")
     return {"suggestions": base[:6]}
@@ -187,8 +192,10 @@ async def chat(req: ChatRequest):
 
     # ── Montar system prompt com tudo ────────────────────────────
     sys_prompt = (
-        "Você é um assistente inteligente da CGR Telecom. "
-        "Responda em português brasileiro de forma clara e completa.\n\n"
+        "Você é o Assistente CGR — um especialista em redes e telecomunicações "
+        "da CGR Telecom. Você ajuda a configurar switches, OLTs, roteadores, "
+        "ONTs, ONUs, VLANs e demais equipamentos de rede. "
+        "Responda em português brasileiro de forma clara, técnica e completa.\n\n"
         "REGRA IMPORTANTE: Você tem memória de longo prazo. Você DEVE usar as "
         "informações das memórias e conversas anteriores ao responder. "
         "Se o usuário perguntar algo que já foi discutido ou informado antes, "
@@ -377,7 +384,7 @@ async def learn(files: List[UploadFile] = File(...)):
                 result = process_and_store_document(filepath, filename)
 
                 if result["success"]:
-                    yield _sse("log", {"msg": f"✅ {filename}: {result['chunks']} chunks salvos no banco SQLite"})
+                    yield _sse("log", {"msg": f"✅ {filename}: {result['chunks']} chunks salvos com embeddings"})
                     processed_names.append(filename)
                 else:
                     yield _sse("log", {"msg": f"❌ {filename}: {result.get('error', 'erro')}"})
@@ -469,6 +476,7 @@ async def delete_memory(mem_id: int):
 @app.post("/api/knowledge/ingest")
 async def knowledge_ingest():
     """Força ingestão de arquivos da pasta saida_ia."""
+    from app.embedding_service import embed_texts as _embed_texts
     logs = []
     saida_dir = os.path.join(BASE_DIR, "saida_ia")
     if not os.path.exists(saida_dir):
@@ -499,14 +507,16 @@ async def knowledge_ingest():
             db.add(doc)
             db.flush()
 
-            for i, chunk_text in enumerate(chunks):
+            embeddings = _embed_texts(chunks)
+            for i, (chunk_text, emb) in enumerate(zip(chunks, embeddings)):
                 db.add(KnowledgeChunk(
                     document_id=doc.id, chunk_index=i,
                     content=chunk_text, source=fname,
+                    embedding=emb,
                 ))
 
             db.commit()
-            logs.append(f"✅ {fname}: {len(chunks)} chunks ingeridos no SQLite")
+            logs.append(f"✅ {fname}: {len(chunks)} chunks ingeridos com embeddings")
         except Exception as e:
             db.rollback()
             logs.append(f"❌ {fname}: {str(e)}")
@@ -602,6 +612,20 @@ async def remove_document(doc_id: int):
     if delete_document(doc_id):
         return {"message": "Removido"}
     raise HTTPException(404, "Não encontrado")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  BACKFILL EMBEDDINGS (migração)
+# ══════════════════════════════════════════════════════════════════
+@app.post("/api/backfill")
+async def run_backfill():
+    """Gera embeddings para chunks e memórias que ainda não possuem."""
+    chunks_result = backfill_embeddings()
+    memories_result = backfill_memory_embeddings()
+    return {
+        "chunks": chunks_result,
+        "memories": memories_result,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════

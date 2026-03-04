@@ -1,16 +1,22 @@
 """
 Serviço de memória conversacional.
-- Extrai fatos/informações importantes de cada conversa e salva no SQLite.
-- Busca memórias relevantes para enriquecer o contexto do chat.
+- Extrai fatos/informações importantes de cada conversa e salva no PostgreSQL.
+- Busca memórias relevantes por similaridade vetorial (pgvector).
 - Busca histórico de conversas anteriores por similaridade.
 """
 
+import logging
 from datetime import datetime
 from typing import List, Tuple
+
+from sqlalchemy import text as sa_text
 
 from app.database import (
     ChatMemory, ChatMessage, ChatSession, SessionLocal,
 )
+from app.embedding_service import embed_single, embed_texts
+
+logger = logging.getLogger(__name__)
 
 
 # ── Palavras indicadoras de informação importante ────────────────
@@ -85,27 +91,39 @@ def extract_facts_from_exchange(
 
 
 def store_facts(facts: List[str], session_id: str = "", category: str = "general"):
-    """Salva fatos extraídos na tabela chat_memories."""
+    """Salva fatos extraídos na tabela chat_memories com embeddings."""
     if not facts:
         return
 
     db = SessionLocal()
     try:
+        # Filtrar fatos válidos e não duplicados
+        new_facts = []
         for fact in facts:
             if len(fact.strip()) < 5:
                 continue
-            # Evitar duplicatas exatas
             existing = db.query(ChatMemory).filter(ChatMemory.fact == fact.strip()).first()
             if existing:
                 continue
+            new_facts.append(fact.strip())
+
+        if not new_facts:
+            return
+
+        # Gerar embeddings em batch
+        embeddings = embed_texts(new_facts)
+
+        for fact_text, emb in zip(new_facts, embeddings):
             db.add(ChatMemory(
-                fact=fact.strip(),
+                fact=fact_text,
                 source_session_id=session_id,
                 category=category,
+                embedding=emb,
             ))
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
+        logger.error("Erro ao salvar fatos: %s", e)
     finally:
         db.close()
 
@@ -113,17 +131,38 @@ def store_facts(facts: List[str], session_id: str = "", category: str = "general
 def get_relevant_memories(query: str, max_results: int = 5) -> List[str]:
     """
     Busca memórias (fatos de conversas anteriores) relevantes para a query.
-    Usa correspondência de palavras-chave.
+    Usa busca vetorial (cosine distance) com fallback para palavras-chave.
     """
     db = SessionLocal()
     try:
+        # ── 1) Busca vetorial ────────────────────────────────────
+        query_emb = embed_single(query)
+        has_embedding = any(v != 0.0 for v in query_emb)
+
+        if has_embedding:
+            results = db.execute(
+                sa_text("""
+                    SELECT fact, embedding <=> :qvec AS dist
+                    FROM chat_memories
+                    WHERE embedding IS NOT NULL
+                    ORDER BY dist ASC
+                    LIMIT :lim
+                """),
+                {"qvec": str(query_emb), "lim": max_results},
+            ).fetchall()
+
+            if results:
+                relevant = [fact for fact, dist in results if dist < 0.80]
+                if relevant:
+                    return relevant
+
+        # ── 2) Fallback: palavras-chave ──────────────────────────
         all_memories = db.query(ChatMemory).order_by(ChatMemory.created_at.desc()).all()
         if not all_memories:
             return []
 
         query_words = set(query.lower().split())
         scored: List[Tuple[int, str]] = []
-
         for mem in all_memories:
             mem_words = set(mem.fact.lower().split())
             score = len(query_words.intersection(mem_words))
@@ -132,7 +171,8 @@ def get_relevant_memories(query: str, max_results: int = 5) -> List[str]:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [fact for _, fact in scored[:max_results]]
-    except Exception:
+    except Exception as e:
+        logger.error("Erro em get_relevant_memories: %s", e)
         return []
     finally:
         db.close()
@@ -222,5 +262,41 @@ def get_recent_memories_summary(limit: int = 10) -> str:
         return "\n".join(f"- {m.fact}" for m in memories)
     except Exception:
         return ""
+    finally:
+        db.close()
+
+
+def backfill_memory_embeddings(batch_size: int = 32) -> dict:
+    """
+    Gera embeddings para memórias que ainda não possuem (embedding IS NULL).
+    Útil após migração de dados antigos do SQLite.
+    """
+    db = SessionLocal()
+    try:
+        pending = db.query(ChatMemory).filter(
+            ChatMemory.embedding.is_(None)
+        ).all()
+
+        if not pending:
+            return {"updated": 0, "message": "Todas as memórias já possuem embeddings."}
+
+        total = len(pending)
+        updated = 0
+
+        for i in range(0, total, batch_size):
+            batch = pending[i:i + batch_size]
+            texts = [m.fact for m in batch]
+            embeddings = embed_texts(texts)
+            for mem, emb in zip(batch, embeddings):
+                mem.embedding = emb
+                updated += 1
+            db.commit()
+            logger.info("Backfill memórias: %d/%d atualizadas", updated, total)
+
+        return {"updated": updated, "message": f"{updated} memórias atualizadas com embeddings."}
+    except Exception as e:
+        db.rollback()
+        logger.error("Erro no backfill de memórias: %s", e)
+        return {"updated": 0, "error": str(e)}
     finally:
         db.close()
