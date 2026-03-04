@@ -2,7 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: cgr_postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_DB: cgr_assistant
       POSTGRES_USER: postgres
