@@ -1,158 +1,131 @@
 """
-Banco de dados PostgreSQL + pgvector — sessões de chat, documentos,
-chunks de conhecimento com embeddings vetoriais.
+Banco de dados PostgreSQL + pgvector.
 """
-
-import logging
 import uuid
+import logging
 from datetime import datetime
+from contextlib import contextmanager
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Column, DateTime, ForeignKey, Index, Integer, String, Text,
-    create_engine, event, text,
+    create_engine, Column, Integer, String, Text, DateTime, Float, Index
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import declarative_base, sessionmaker
+from pgvector.sqlalchemy import Vector
 
 from app.config import DATABASE_URL, EMBED_DIM
 
 logger = logging.getLogger(__name__)
 
-# ── Engine (PostgreSQL com pool de conexões) ─────────────────────
 engine = create_engine(
     DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=10,
+    max_overflow=20,
     pool_pre_ping=True,
-    echo=False,
+    pool_recycle=3600,
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
 def new_id() -> str:
-    return uuid.uuid4().hex[:12]
+    return uuid.uuid4().hex[:16]
 
 
-# ── Sessões de Chat ──────────────────────────────────────────────
-class ChatSession(Base):
-    __tablename__ = "chat_sessions"
-    id = Column(String(24), primary_key=True, default=new_id)
-    preview = Column(String(120), default="Nova conversa")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    messages = relationship(
-        "ChatMessage", back_populates="session",
-        cascade="all, delete-orphan",
-        order_by="ChatMessage.created_at",
-    )
+# ── Modelos ──────────────────────────────────────────────
 
-
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(24), ForeignKey("chat_sessions.id"), nullable=False, index=True)
-    role = Column(String(20), nullable=False)
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    session = relationship("ChatSession", back_populates="messages")
-
-
-# ── Documentos processados ───────────────────────────────────────
 class Document(Base):
     __tablename__ = "documents"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    filename = Column(String(255), nullable=False, unique=True)
-    content = Column(Text, nullable=False)
-    doc_type = Column(String(50), default="unknown")
-    chunks_count = Column(Integer, default=0)
+    uid = Column(String(32), default=new_id, unique=True, index=True)
+    filename = Column(String(512), nullable=False)
+    filepath = Column(String(1024))
+    file_type = Column(String(32))
+    file_size = Column(Integer, default=0)
+    num_chunks = Column(Integer, default=0)
+    status = Column(String(32), default="pending")
+    error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
-    chunks = relationship(
-        "KnowledgeChunk", back_populates="document",
-        cascade="all, delete-orphan",
-    )
 
 
-# ── Chunks de Conhecimento (banco permanente para RAG) ───────────
 class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    document_id = Column(Integer, index=True)
     chunk_index = Column(Integer, default=0)
     content = Column(Text, nullable=False)
-    source = Column(String(255), default="")
-    embedding = Column(Vector(EMBED_DIM), nullable=True)
+    source = Column(String(512))
+    category = Column(String(128))
+    embedding = Column(Vector(EMBED_DIM))
     created_at = Column(DateTime, default=datetime.utcnow)
-    document = relationship("Document", back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_kc_source", "source"),
+        Index("ix_kc_category", "category"),
+    )
 
 
-# ── Memória de conversas (fatos aprendidos via chat) ─────────────
 class ChatMemory(Base):
     __tablename__ = "chat_memories"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    fact = Column(Text, nullable=False)
-    source_session_id = Column(String(24), default="")
-    category = Column(String(50), default="general")
-    embedding = Column(Vector(EMBED_DIM), nullable=True)
+    session_id = Column(String(64), index=True)
+    role = Column(String(16))
+    content = Column(Text, nullable=False)
+    fact = Column(Text)
+    memory_type = Column(String(32), default="conversation")
+    relevance_score = Column(Float, default=0.5)
+    embedding = Column(Vector(EMBED_DIM))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_cm_session", "session_id"),
+        Index("ix_cm_created", "created_at"),
+    )
 
 
 class TrainingStatus(Base):
     __tablename__ = "training_status"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    filename = Column(String(255), nullable=False)
-    status = Column(String(50), default="pending")
-    message = Column(Text, default="")
+    document_id = Column(Integer, index=True)
+    status = Column(String(32), default="pending")
+    message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ── Índices para busca vetorial (ivfflat) ────────────────────────
-# São criados após create_all para que as tabelas já existam.
-_VECTOR_INDEXES = [
-    Index(
-        "ix_knowledge_chunks_embedding",
-        KnowledgeChunk.embedding,
-        postgresql_using="ivfflat",
-        postgresql_with={"lists": 100},
-        postgresql_ops={"embedding": "vector_cosine_ops"},
-    ),
-    Index(
-        "ix_chat_memories_embedding",
-        ChatMemory.embedding,
-        postgresql_using="ivfflat",
-        postgresql_with={"lists": 100},
-        postgresql_ops={"embedding": "vector_cosine_ops"},
-    ),
-]
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), unique=True, index=True)
+    title = Column(String(256), default="Nova Conversa")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-def init_db():
-    """Cria a extensão pgvector e todas as tabelas/índices."""
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.commit()
-        Base.metadata.create_all(bind=engine)
-        # Criar índices vetoriais (ignora se já existem)
-        for idx in _VECTOR_INDEXES:
-            try:
-                idx.create(bind=engine)
-            except Exception:
-                pass  # Índice já existe
-        logger.info("Banco PostgreSQL + pgvector inicializado com sucesso.")
-    except Exception as e:
-        logger.warning(
-            "Não foi possível conectar ao PostgreSQL: %s. "
-            "Verifique se o container Docker está rodando (docker-compose up -d).",
-            e,
-        )
+# ── Context manager ──────────────────────────────────────
 
-
+@contextmanager
 def get_db():
-    """Context manager / generator para obter sessão do banco."""
     db = SessionLocal()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+
+# ── Init ─────────────────────────────────────────────────
+
+def init_db():
+    """Cria extensão pgvector e todas as tabelas."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(__import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+        Base.metadata.create_all(bind=engine)
+        logger.info("Banco PostgreSQL + pgvector inicializado com sucesso.")
+    except Exception as e:
+        logger.error(f"Erro ao inicializar banco: {e}")
+        raise

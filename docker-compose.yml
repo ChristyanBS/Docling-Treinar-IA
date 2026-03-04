@@ -6,13 +6,18 @@ services:
     container_name: cgr_postgres
     restart: unless-stopped
     environment:
+      POSTGRES_DB: cgr_assistant
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: cgr_assistant
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
