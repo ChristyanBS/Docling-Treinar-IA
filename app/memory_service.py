@@ -1,297 +1,266 @@
 """
-Serviço de memória conversacional.
-- Extrai fatos/informações importantes de cada conversa e salva no SQLite.
-- Busca memórias relevantes para enriquecer o contexto do chat.
-- Busca histórico de conversas anteriores por similaridade.
+Serviço de memória contínua da IA.
+Armazena fatos, conversas e aprendizados no PostgreSQL com embeddings pgvector.
 """
-
+import re
+import logging
+from typing import List, Optional
 from datetime import datetime
-from typing import List, Tuple
 
-from app.database import (
-    ChatMemory, ChatMessage, ChatSession, SessionLocal,
-)
+from app.database import SessionLocal, ChatMemory
+from app.embedding_service import embed_texts, embed_single
+
+logger = logging.getLogger(__name__)
 
 
-# ── Palavras indicadoras de informação importante ────────────────
-_FACT_INDICATORS = [
-    "meu nome é", "me chamo", "eu sou", "trabalho com", "trabalho na",
-    "meu ip é", "o ip é", "o endereço é", "a senha é", "o servidor é",
-    "o modelo é", "a porta é", "estou usando", "nós usamos", "a empresa",
-    "o cliente", "o contrato", "o número", "sempre que", "lembre",
-    "anota", "guarda isso", "não esqueça", "importante:",
-    "meu email", "meu telefone", "o problema é", "a solução é",
-    "a rede", "a vlan", "o switch", "o roteador", "o olt",
-    "configuração", "topologia", "endereço", "equipamento",
-]
+def extract_facts_from_exchange(user_msg: str, ai_msg: str) -> List[str]:
+    """Extrai fatos explícitos da troca de mensagens."""
+    facts = []
 
-# Frases que indicam pedido de memória ("lembre", "guarde", etc.)
-_EXPLICIT_MEMORY = [
-    "lembre", "lembra", "anota", "guarda", "guarde", "memorize",
-    "não esqueça", "nao esqueca", "salva isso", "salve isso",
-    "registra isso", "importante:", "nota:",
-]
-# Padrões para nomes (palavras maiúsculas que viçam depois de "sou", "chamo", etc)
-_NAME_PATTERNS = ['chamo', 'sou', 'nome é', 'meu nome', 'é ', 'chamado']
-
-def extract_facts_from_exchange(
-    user_msg: str,
-    assistant_msg: str,
-    session_id: str = "",
-) -> List[str]:
-    """
-    Analisa uma troca user↔assistant e extrai fatos relevantes
-    para salvar na memória de longo prazo.
-    
-    Prioriza NOMES para garantir que sejam salvos.
-    """
-    facts: List[str] = []
-    user_lower = user_msg.lower()
-
-    # 1) DETECTAR NOMES ESPECIFICAMENTE
-    # Procurar padrões: "meu nome é X", "me chamo X", "sou X"
-    name_indicators = [
-        'meu nome é', 'me chamo', 'chamo-me', 'me chama', 'me chama de',
-        'eu sou ', 'meu nome:', 'nome é', 'meu nome é:',
+    teaching_patterns = [
+        r"(?:lembre|anote|memorize|grave|saiba)\s*(?:que|:)\s*(.+)",
+        r"(?:a|o)\s+(\w+)\s+(?:é|são|fica|tem|usa|funciona)\s+(.+)",
+        r"(?:ip|endereço|porta|vlan|olt|ont|onu|switch|roteador)\s+(.+?)(?:\.|$)",
+        r"(?:para|pra)\s+(?:configurar|acessar|conectar)\s+(.+?)(?:\.|$)",
+        r"(?:o modelo|a marca|o tipo)\s+(.+?)(?:\.|$)",
     ]
-    for indicator in name_indicators:
-        if indicator in user_lower:
-            # Extrair o que vem depois do indicador
-            idx = user_lower.find(indicator)
-            after_indicator = user_msg[idx + len(indicator):].strip()
-            # Pegar a primeira "coisa" após o indicador
-            potential_name = after_indicator.split()[0] if after_indicator.split() else ""
-            if potential_name and len(potential_name) > 1:
-                # Salvar de forma que seja fácil encontrar depois
-                facts.append(f"NOME: {potential_name.strip('.,!?')}")
-                facts.append(f"O nome do usuário é {potential_name.strip('.,!?')}")
-                return facts  # Nome é prioridade máxima
 
-    # 2) O usuário pediu explicitamente para lembrar algo?
-    for trigger in _EXPLICIT_MEMORY:
-        if trigger in user_lower:
-            facts.append(f"O usuário pediu para lembrar: {user_msg.strip()}")
-            return facts  # Não precisa analisar mais
+    for pattern in teaching_patterns:
+        matches = re.findall(pattern, user_msg, re.IGNORECASE)
+        for m in matches:
+            if isinstance(m, tuple):
+                fact = " ".join(m).strip()
+            else:
+                fact = m.strip()
+            if len(fact) > 10:
+                facts.append(fact)
 
-    # 3) A mensagem contém indicadores de informação útil?
-    matched_indicators = []
-    for indicator in _FACT_INDICATORS:
-        if indicator in user_lower:
-            matched_indicators.append(indicator)
+    confirm_patterns = [
+        r"(?:isso|correto|exato|sim|isso mesmo)",
+        r"(?:não|errado|incorreto|na verdade)\s*[,.]?\s*(.+)",
+    ]
+    for pattern in confirm_patterns:
+        matches = re.findall(pattern, user_msg, re.IGNORECASE)
+        if matches:
+            for m in matches:
+                if isinstance(m, str) and len(m.strip()) > 10:
+                    facts.append("Correção: " + m.strip())
 
-    if matched_indicators:
-        # Extrair frases que contêm os indicadores
-        sentences = [s.strip() for s in user_msg.replace("\n", ". ").split(".") if s.strip()]
-        for sentence in sentences:
-            sentence_lower = sentence.lower()
-            for indicator in matched_indicators:
-                if indicator in sentence_lower and len(sentence.strip()) > 5:
-                    facts.append(sentence.strip())
-                    break  # Evitar duplicar mesma frase
+    if not facts and len(user_msg) > 50:
+        tech_keywords = [
+            "ip", "vlan", "olt", "ont", "onu", "switch", "roteador",
+            "porta", "config", "rede", "gpon", "epon", "nokia", "huawei",
+            "datacom", "intelbras", "ospf", "bgp", "rack", "servidor",
+        ]
+        msg_lower = user_msg.lower()
+        if any(kw in msg_lower for kw in tech_keywords):
+            facts.append(user_msg[:500])
 
-    # 4) Se não encontrou fatos com indicadores, mas a mensagem é informativa, salvar como contexto
+    return facts
+
+
+def store_facts(session_id: str, user_msg: str, ai_msg: str) -> int:
+    """Extrai fatos de uma troca e salva no banco com embeddings."""
+    facts = extract_facts_from_exchange(user_msg, ai_msg)
     if not facts:
-        is_question = user_lower.strip().endswith("?")
-        # Mensagens que não são só perguntas simples devem ser salvas
-        if not is_question and len(user_msg.strip()) > 10:
-            # Salvar a mensagem inteira como contexto importante
-            facts.append(f"O usuário disse: {user_msg.strip()}")
-        elif len(user_msg.strip()) > 50:
-            # Mesmo que seja pergunta, salvar se for longa (pode conter contexto importante)
-            facts.append(f"O usuário perguntou: {user_msg.strip()}")
-
-    return facts[:10]  # Máximo de 10 fatos por troca
-
-
-def store_facts(facts: List[str], session_id: str = "", category: str = "general"):
-    """Salva fatos extraídos na tabela chat_memories."""
-    if not facts:
-        return
+        return 0
 
     db = SessionLocal()
     try:
-        for fact in facts:
-            if len(fact.strip()) < 5:
-                continue
-            # Evitar duplicatas exatas
-            existing = db.query(ChatMemory).filter(ChatMemory.fact == fact.strip()).first()
-            if existing:
-                continue
-            db.add(ChatMemory(
-                fact=fact.strip(),
-                source_session_id=session_id,
-                category=category,
-            ))
+        embeddings = embed_texts(facts)
+        if embeddings is None:
+            embeddings = [None] * len(facts)
+
+        stored = 0
+        for fact, emb in zip(facts, embeddings):
+            mem = ChatMemory(
+                session_id=session_id,
+                role="fact",
+                content=fact,
+                fact=fact,
+                memory_type="learned_fact",
+                relevance_score=0.8,
+                embedding=emb,
+            )
+            db.add(mem)
+            stored += 1
+
         db.commit()
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
-
-
-def get_relevant_memories(query: str, max_results: int = 5) -> List[str]:
-    """
-    Busca memórias (fatos de conversas anteriores) relevantes para a query.
-    Usa correspondência de palavras-chave e sem semântica inteligente.
-    """
-    db = SessionLocal()
-    try:
-        all_memories = db.query(ChatMemory).order_by(ChatMemory.created_at.desc()).all()
-        if not all_memories:
-            return []
-
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        
-        # Palavras-chave para diferentes tipos de memória
-        personal_keywords = {
-            'nome': ['nome:', 'nome', 'chamo', 'sou', 'chamado', 'meu nome', 'me chama'],
-            'email': ['email', 'mail', '@'],
-            'telefone': ['telefone', 'whatsapp', 'celular', 'fone', 'número'],
-            'trabalho': ['trabalho', 'empresa', 'cargo', 'função', 'profissão'],
-            'localização': ['mora', 'cidade', 'estado', 'endereço', 'local'],
-        }
-        
-        # Verificar que tipo de informação está sendo pedida
-        query_type = 'general'
-        for info_type, keywords in personal_keywords.items():
-            if any(kw in query_lower for kw in keywords):
-                query_type = info_type
-                break
-        
-        scored = []
-        
-        for mem in all_memories:
-            mem_fact = mem.fact.lower()
-            
-            # Se está buscando informação pessoal, priorize memórias sobre isso
-            if query_type in personal_keywords:
-                type_keywords = personal_keywords[query_type]
-                # CRÍTICO: Procurar não só as palavras-chave, mas também o padrão "NOME:"
-                if query_type == 'nome':
-                    # Procurar explicitamente por "NOME:" ou "nome:"
-                    if 'nome:' in mem_fact:
-                        scored.append((500, mem.fact))  # Score MÁXIMO
-                        continue
-                
-                # Também procurar por keywords gerais
-                if any(kw in mem_fact for kw in type_keywords):
-                    # Encontrou memória sobre o tipo específico
-                    scored.append((100, mem.fact))  # Score muito alto
-                    continue
-            
-            # Busca geral por palavras-chave
-            mem_words = set(mem_fact.split())
-            score = len(query_words.intersection(mem_words))
-            if score > 0:
-                scored.append((score, mem.fact))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        result = [fact for _, fact in scored[:max_results]]
-        return result
+        logger.info("Sessão %s: %d fatos salvos com embeddings", session_id, stored)
+        return stored
     except Exception as e:
-        print(f"[ERROR] get_relevant_memories falhou: {e}")
-        return []
+        db.rollback()
+        logger.error("Erro ao salvar fatos: %s", e)
+        return 0
     finally:
         db.close()
 
 
-def get_past_conversations_context(
-    query: str,
-    current_session_id: str = "",
-    max_sessions: int = 3,
-    max_messages_per_session: int = 4,
-) -> str:
-    """
-    Busca conversas ANTERIORES relevantes para a query atual.
-    Retorna um resumo formatado das conversas passadas relacionadas.
-    
-    NÃO traz conversas antigas quando a pergunta é sobre informações pessoais.
-    """
+def store_interaction_memory(session_id: str, role: str, content: str) -> None:
+    """Salva uma mensagem de conversa no banco com embedding."""
     db = SessionLocal()
     try:
-        # Se a pergunta é sobre informações pessoais, não trazer conversas antigas
-        personal_keywords = ['nome', 'email', 'telefone', 'chamo', 'sou', 'trabalho', 'empresa']
-        query_lower = query.lower()
-        
-        # Checar se é pergunta pessoal
-        is_personal_query = any(kw in query_lower for kw in personal_keywords)
-        
-        # Se é pergunta pessoal, não trazer conversas antigas - só usar memórias diretas
-        if is_personal_query:
-            return ""  # Deixar para as memórias salvas responderem
-        
-        # Buscar todas as sessões que NÃO são a sessão atual
-        sessions = (
-            db.query(ChatSession)
-            .filter(ChatSession.id != current_session_id)
-            .order_by(ChatSession.created_at.desc())
-            .limit(50)  # Buscar nas últimas 50 sessões
+        emb = embed_single(content[:1000])
+        mem = ChatMemory(
+            session_id=session_id,
+            role=role,
+            content=content,
+            memory_type="conversation",
+            relevance_score=0.5,
+            embedding=emb,
+        )
+        db.add(mem)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("Erro ao salvar interação: %s", e)
+    finally:
+        db.close()
+
+
+def get_relevant_memories(query: str, max_results: int = 5) -> str:
+    """Busca memórias relevantes usando busca vetorial."""
+    db = SessionLocal()
+    try:
+        query_emb = embed_single(query)
+        if query_emb is not None:
+            results = (
+                db.query(ChatMemory)
+                .filter(ChatMemory.embedding.isnot(None))
+                .filter(ChatMemory.memory_type == "learned_fact")
+                .order_by(ChatMemory.embedding.cosine_distance(query_emb))
+                .limit(max_results)
+                .all()
+            )
+            if results:
+                parts = []
+                for r in results:
+                    parts.append("- " + (r.fact or r.content))
+                return "\n".join(parts)
+
+        keywords = [w.lower() for w in query.split() if len(w) > 3]
+        if not keywords:
+            return ""
+
+        all_mems = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.memory_type == "learned_fact")
+            .order_by(ChatMemory.created_at.desc())
+            .limit(200)
             .all()
         )
 
-        if not sessions:
-            return ""
-
-        query_words = set(query_lower.split())
-        scored_sessions: List[Tuple[int, str, list]] = []
-
-        for sess in sessions:
-            # Buscar mensagens da sessão
-            msgs = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.session_id == sess.id)
-                .order_by(ChatMessage.created_at)
-                .all()
-            )
-            if not msgs:
-                continue
-
-            # Pontuar pela relevância das mensagens
-            session_text = " ".join(m.content.lower() for m in msgs)
-            session_words = set(session_text.split())
-            score = len(query_words.intersection(session_words))
-
+        scored = []
+        for mem in all_mems:
+            content_lower = (mem.fact or mem.content or "").lower()
+            score = sum(1 for kw in keywords if kw in content_lower)
             if score > 0:
-                msg_data = [(m.role, m.content) for m in msgs]
-                scored_sessions.append((score, sess.id, msg_data))
+                scored.append((score, mem))
 
-        scored_sessions.sort(key=lambda x: x[0], reverse=True)
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:max_results]
 
-        # Formatar contexto das melhores sessões
+        if top:
+            parts = []
+            for _, m in top:
+                parts.append("- " + (m.fact or m.content))
+            return "\n".join(parts)
+
+        return ""
+    except Exception as e:
+        logger.error("Erro ao buscar memórias: %s", e)
+        return ""
+    finally:
+        db.close()
+
+
+def get_past_conversations_context(session_id: str, limit: int = 20) -> str:
+    """Retorna as últimas mensagens da sessão atual."""
+    db = SessionLocal()
+    try:
+        msgs = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.session_id == session_id)
+            .filter(ChatMemory.memory_type == "conversation")
+            .order_by(ChatMemory.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        msgs.reverse()
+        if not msgs:
+            return ""
         parts = []
-        for _, sess_id, msgs in scored_sessions[:max_sessions]:
-            conv_lines = []
-            for role, content in msgs[-max_messages_per_session:]:
-                prefix = "Usuário" if role == "user" else "Assistente"
-                # Limitar tamanho do conteúdo
-                short = content[:300] + "..." if len(content) > 300 else content
-                conv_lines.append(f"  {prefix}: {short}")
-
-            if conv_lines:
-                parts.append("Conversa anterior:\n" + "\n".join(conv_lines))
-
-        return "\n\n".join(parts)
-    except Exception:
+        for m in msgs:
+            parts.append(m.role + ": " + m.content)
+        return "\n".join(parts)
+    except Exception as e:
+        logger.error("Erro ao buscar conversas: %s", e)
         return ""
     finally:
         db.close()
 
 
 def get_recent_memories_summary(limit: int = 10) -> str:
-    """Retorna um resumo das memórias mais recentes."""
+    """Retorna resumo dos fatos recentes aprendidos."""
     db = SessionLocal()
     try:
-        memories = (
+        mems = (
             db.query(ChatMemory)
+            .filter(ChatMemory.memory_type == "learned_fact")
             .order_by(ChatMemory.created_at.desc())
             .limit(limit)
             .all()
         )
-        if not memories:
+        if not mems:
             return ""
-        return "\n".join(f"- {m.fact}" for m in memories)
-    except Exception:
+        parts = []
+        for m in mems:
+            parts.append("- " + (m.fact or m.content))
+        return "Fatos recentes aprendidos:\n" + "\n".join(parts)
+    except Exception as e:
+        logger.error("Erro ao buscar resumo: %s", e)
         return ""
+    finally:
+        db.close()
+
+
+def backfill_memory_embeddings(batch_size: int = 32) -> dict:
+    """Gera embeddings para memórias que ainda não têm."""
+    db = SessionLocal()
+    try:
+        mems = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.embedding.is_(None))
+            .limit(batch_size)
+            .all()
+        )
+        if not mems:
+            return {"updated": 0, "message": "Nenhuma memória sem embedding"}
+
+        texts = []
+        for m in mems:
+            texts.append((m.fact or m.content)[:1000])
+        embeddings = embed_texts(texts)
+
+        if embeddings is None:
+            return {"updated": 0, "error": "Não foi possível gerar embeddings"}
+
+        updated = 0
+        for mem, emb in zip(mems, embeddings):
+            if emb is not None:
+                mem.embedding = emb
+                updated += 1
+
+        db.commit()
+        remaining = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.embedding.is_(None))
+            .count()
+        )
+        return {"updated": updated, "remaining": remaining}
+    except Exception as e:
+        db.rollback()
+        logger.error("Erro no backfill de memórias: %s", e)
+        return {"updated": 0, "error": str(e)}
     finally:
         db.close()
