@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+import json
 import sqlalchemy
 
 from fastapi import FastAPI, UploadFile, File, Form, Request
@@ -195,12 +196,12 @@ async def chat(request: Request):
     def generate():
         for token in chat_stream(messages):
             full_response_parts.append(token)
-            yield "data: " + token + "\n\n"
+            yield "event: token\ndata: " + json.dumps({"token": token}) + "\n\n"
         # Salvar resposta completa
         ai_msg = "".join(full_response_parts)
         store_interaction_memory(session_id, "assistant", ai_msg)
         store_facts(session_id, user_msg, ai_msg)
-        yield "data: [DONE]\n\n"
+        yield "event: done\ndata: " + json.dumps({"session_id": session_id}) + "\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
