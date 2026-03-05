@@ -1,4 +1,13 @@
 services:
+  ollama:
+    image: ollama/ollama
+    container_name: cgr_ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
   postgres:
     image: pgvector/pgvector:pg16
     container_name: cgr_postgres
@@ -19,3 +28,4 @@ services:
 
 volumes:
   pgdata:
+  ollama_data:
