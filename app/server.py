@@ -418,3 +418,138 @@ def stats():
         }
     finally:
         db.close()
+
+
+# ── Rotas de compatibilidade com frontend ────────────────
+
+@app.get("/api/ollama/status")
+def ollama_status():
+    """Retorna status do Ollama no formato esperado pelo frontend."""
+    result = check_ollama()
+    if result.get("online"):
+        return {"status": "connected", "models": result.get("models", [])}
+    return {"status": "offline", "models": []}
+
+
+@app.get("/api/knowledge/stats")
+def knowledge_stats():
+    """Alias de /api/stats no formato esperado pelo frontend."""
+    db = SessionLocal()
+    try:
+        total_docs = db.query(Document).count()
+        total_chunks = db.query(KnowledgeChunk).count()
+        sources = [
+            d.filename
+            for d in db.query(Document.filename)
+            .order_by(Document.created_at.desc())
+            .limit(20)
+            .all()
+        ]
+        return {
+            "total_chunks": total_chunks,
+            "total_documents": total_docs,
+            "sources": sources,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/chat/sessions")
+def chat_sessions_list():
+    """Lista sessões no formato esperado pelo frontend."""
+    db = SessionLocal()
+    try:
+        sessions = db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+        result = []
+        for s in sessions:
+            # Buscar última mensagem como preview
+            last_msg = (
+                db.query(ChatMemory.content)
+                .filter(
+                    ChatMemory.session_id == s.session_id,
+                    ChatMemory.memory_type == "conversation",
+                    ChatMemory.role == "user",
+                )
+                .order_by(ChatMemory.created_at.desc())
+                .first()
+            )
+            preview = last_msg[0][:60] if last_msg else s.title or "Nova conversa"
+            result.append({"id": s.session_id, "preview": preview})
+        return {"sessions": result}
+    finally:
+        db.close()
+
+
+@app.post("/api/chat/sessions")
+async def chat_sessions_create(request: Request):
+    """Cria sessão via /api/chat/sessions."""
+    return await create_session(request)
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+def chat_sessions_delete(session_id: str):
+    """Deleta sessão via /api/chat/sessions/{id}."""
+    return delete_session(session_id)
+
+
+@app.get("/api/chat/history/{session_id}")
+def chat_history_by_path(session_id: str):
+    """Retorna histórico de chat no formato esperado pelo frontend."""
+    db = SessionLocal()
+    try:
+        msgs = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.session_id == session_id)
+            .filter(ChatMemory.memory_type == "conversation")
+            .order_by(ChatMemory.created_at.asc())
+            .all()
+        )
+        messages = []
+        for m in msgs:
+            messages.append({"role": m.role, "content": m.content})
+        return {"messages": messages}
+    finally:
+        db.close()
+
+
+@app.post("/api/memory/save")
+async def memory_save(request: Request):
+    """Salva fato na memória (ex: nome do usuário)."""
+    body = await request.json()
+    fact = body.get("fact", "").strip()
+    session_id = body.get("session_id", "default")
+
+    if not fact:
+        return {"ok": False, "error": "Nenhum fato fornecido"}
+
+    db = SessionLocal()
+    try:
+        mem = ChatMemory(
+            session_id=session_id,
+            role="system",
+            content=fact,
+            memory_type="learned_fact",
+        )
+        emb = embed_texts([fact])
+        if emb and emb[0]:
+            mem.embedding = emb[0]
+        db.add(mem)
+        db.commit()
+        return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+@app.post("/api/process")
+async def process_pipeline(request: Request):
+    """Stub para pipeline de processamento."""
+    return {"ok": True, "message": "Pipeline não implementado. Use /api/learn para enviar documentos."}
+
+
+@app.post("/api/process/cancel")
+def cancel_pipeline():
+    """Stub para cancelar pipeline."""
+    return {"ok": True}
