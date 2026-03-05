@@ -59,7 +59,7 @@ IMG_DIR = STATIC_DIR / "img"
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/img", StaticFiles(directory=str(IMG_DIR)), name="img")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ── System prompt ────────────────────────────────────────
 

@@ -70,7 +70,7 @@
             align-items: center;
             gap: 24px;
             width: 100%;
-            padding: 60px 20px 0;
+            padding: 60px 20px 120px;
             overflow-y: auto;
             flex: 1;
             position: relative;
@@ -78,6 +78,8 @@
             right: 50%;
             margin-left: calc(-50vw + 128px);
             margin-right: -50vw;
+            height: 0;
+            min-height: 0;
         }
 
         main.collapsed #msgs {
@@ -1408,7 +1410,7 @@ function grow(el) {
 async function send() {
     if (busy) return;
     const txt = document.getElementById('inp').value.trim();
-    if (!txt) return;
+    if (!txt && queuedFiles.length === 0) return;
 
     // Esconder seção de boas-vindas
     const welcomeSection = document.getElementById('welcome-section');
@@ -1422,8 +1424,36 @@ async function send() {
     document.getElementById('inp').value = '';
     document.getElementById('inp').style.height = 'auto';
 
-    addBubble('user', txt);
-    await doChat(txt);
+    // Enviar arquivos pendentes
+    if (queuedFiles.length > 0) {
+        setBusy(true);
+        for (const file of queuedFiles) {
+            addBubble('user', '📎 Enviando: ' + file.name);
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const resp = await fetch(API + '/api/learn', { method: 'POST', body: formData });
+                const data = await resp.json();
+                if (data.success) {
+                    addBubble('system', '✅ <strong>' + file.name + '</strong> processado — ' + (data.chunks || 0) + ' chunks criados');
+                } else {
+                    addBubble('system', '❌ Erro ao processar <strong>' + file.name + '</strong>: ' + (data.error || 'erro desconhecido'));
+                }
+            } catch (err) {
+                addBubble('system', '❌ Falha no upload de <strong>' + file.name + '</strong>: ' + err.message);
+            }
+        }
+        queuedFiles = [];
+        setBusy(false);
+        loadKbStats();
+        updateKbStatus();
+    }
+
+    // Enviar mensagem de texto
+    if (txt) {
+        addBubble('user', txt);
+        await doChat(txt);
+    }
 }
 
 function addBubble(role, content) {
