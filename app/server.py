@@ -43,10 +43,15 @@ from app.memory_service import (
     get_recent_memories_summary,
     backfill_memory_embeddings,
 )
-from app.embedding_service import embed_texts
+from app.embedding_service import embed_texts, embed_single
+
+import threading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+MAX_KB_CONTEXT_CHARS = 3000
+MAX_MEMORY_CONTEXT_CHARS = 1500
 
 # ── App ──────────────────────────────────────────────────
 
@@ -81,6 +86,13 @@ SYSTEM_PROMPT = (
     "4. Formate com markdown: código em blocos, listas, negrito para termos técnicos.\n"
     "5. Responda em português do Brasil.\n"
     "6. Se o usuário ensinar algo novo, confirme que aprendeu.\n"
+    "\n"
+    "Memória:\n"
+    "- Você tem memória persistente entre conversas.\n"
+    "- Os 'Fatos aprendidos anteriormente' são informações que o usuário já te ensinou. USE-OS para responder.\n"
+    "- Se o usuário perguntar sobre algo que está nos fatos aprendidos, responda com base neles.\n"
+    "- Quando o usuário ensinar algo novo (nomes, IPs, pessoas, configurações), confirme: 'Anotado! Vou lembrar que [fato].'\n"
+    "- Nunca diga que não sabe algo se a informação estiver nos fatos aprendidos ou na base de conhecimento.\n"
 )
 
 
@@ -150,6 +162,15 @@ def suggestions():
 
 # ── Chat ─────────────────────────────────────────────────
 
+def _save_assistant_response(session_id: str, user_msg: str, ai_msg: str):
+    """Salva resposta do assistente e extrai fatos em background thread."""
+    try:
+        store_interaction_memory(session_id, "assistant", ai_msg, skip_embedding=True)
+        store_facts(session_id, user_msg, ai_msg)
+    except Exception as e:
+        logger.error("Erro ao salvar resposta em background: %s", e)
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
@@ -159,36 +180,44 @@ async def chat(request: Request):
     if not user_msg:
         return JSONResponse({"error": "Mensagem vazia"}, status_code=400)
 
-    # Salvar mensagem do usuário
-    store_interaction_memory(session_id, "user", user_msg)
+    # Salvar mensagem do usuário (sem embedding para não bloquear)
+    store_interaction_memory(session_id, "user", user_msg, skip_embedding=True)
 
-    # Buscar contexto
-    kb_context = get_relevant_context(user_msg, max_chunks=6)
-    memory_context = get_relevant_memories(user_msg, max_results=5)
-    conv_context = get_past_conversations_context(session_id, limit=20)
+    # Gerar embedding UMA vez e reutilizar em todas as buscas
+    query_emb = embed_single(user_msg)
+
+    # Buscar contexto usando o embedding pré-computado
+    kb_context = get_relevant_context(user_msg, max_chunks=6, query_embedding=query_emb)
+    memory_context = get_relevant_memories(user_msg, max_results=5, query_embedding=query_emb)
+    conv_history = get_past_conversations_context(session_id, limit=10)
 
     # Montar mensagens
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     if kb_context:
+        kb_trimmed = kb_context[:MAX_KB_CONTEXT_CHARS]
         messages.append({
             "role": "system",
-            "content": "Base de conhecimento relevante:\n\n" + kb_context,
+            "content": "Base de conhecimento relevante:\n\n" + kb_trimmed,
         })
 
     if memory_context:
+        mem_trimmed = memory_context[:MAX_MEMORY_CONTEXT_CHARS]
         messages.append({
             "role": "system",
-            "content": "Fatos aprendidos anteriormente:\n\n" + memory_context,
+            "content": "Fatos aprendidos anteriormente:\n\n" + mem_trimmed,
         })
 
-    if conv_context:
-        messages.append({
-            "role": "system",
-            "content": "Contexto da conversa atual:\n\n" + conv_context,
-        })
+    # Adicionar histórico como mensagens separadas (melhor para formato chat)
+    if conv_history:
+        for msg in conv_history:
+            role = msg["role"] if msg["role"] in ("user", "assistant") else "user"
+            messages.append({"role": role, "content": msg["content"]})
 
     messages.append({"role": "user", "content": user_msg})
+
+    total_chars = sum(len(m["content"]) for m in messages)
+    logger.info("Chat session=%s msgs=%d total_chars=%d", session_id, len(messages), total_chars)
 
     # Streaming
     full_response_parts = []
@@ -197,11 +226,16 @@ async def chat(request: Request):
         for token in chat_stream(messages):
             full_response_parts.append(token)
             yield "event: token\ndata: " + json.dumps({"token": token}) + "\n\n"
-        # Salvar resposta completa
-        ai_msg = "".join(full_response_parts)
-        store_interaction_memory(session_id, "assistant", ai_msg)
-        store_facts(session_id, user_msg, ai_msg)
+        # Enviar done ANTES de salvar (não bloquear o cliente)
         yield "event: done\ndata: " + json.dumps({"session_id": session_id}) + "\n\n"
+        # Salvar resposta em background thread para não atrasar o SSE
+        ai_msg = "".join(full_response_parts)
+        t = threading.Thread(
+            target=_save_assistant_response,
+            args=(session_id, user_msg, ai_msg),
+            daemon=True,
+        )
+        t.start()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

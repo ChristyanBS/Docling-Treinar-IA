@@ -197,15 +197,16 @@ def process_and_store_document(filepath: str, filename: str) -> dict:
         db.close()
 
 
-def get_relevant_context(query: str, max_chunks: int = 8) -> str:
+def get_relevant_context(query: str, max_chunks: int = 8, query_embedding=None) -> str:
     """
     Busca chunks relevantes usando busca vetorial (cosine distance) no pgvector.
     Faz fallback para busca por palavras-chave se não houver embeddings.
+    Aceita embedding pré-computado para evitar chamada redundante.
     """
     db = SessionLocal()
     try:
         # Tentar busca vetorial
-        query_emb = embed_single(query)
+        query_emb = query_embedding if query_embedding is not None else embed_single(query)
         if query_emb is not None:
             results = (
                 db.query(KnowledgeChunk)
