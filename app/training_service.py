@@ -4,6 +4,7 @@ Armazena tudo no PostgreSQL (documents + knowledge_chunks) com embeddings pgvect
 """
 
 import os
+import re
 import json
 import logging
 from typing import List
@@ -17,20 +18,67 @@ from app.embedding_service import embed_texts, embed_single
 
 logger = logging.getLogger(__name__)
 
+# Distância cosseno máxima para considerar um chunk relevante (0=idêntico, 2=oposto)
+# Chunks com distância > 0.85 são filtrados como irrelevantes
+MAX_COSINE_DISTANCE = 0.80
+
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-    """Divide texto em chunks com overlap."""
+    """Divide texto em chunks semânticos: primeiro por seções/parágrafos, depois por tamanho."""
     if not text or not text.strip():
         return []
-    words = text.split()
+
+    # Dividir por seções markdown (## Título) ou blocos de linhas em branco duplas
+    sections = re.split(r'\n(?=#{1,3}\s)|\n{3,}', text)
+
     chunks = []
-    start = 0
-    while start < len(words):
-        end = start + chunk_size
-        chunk = " ".join(words[start:end])
-        if chunk.strip():
-            chunks.append(chunk.strip())
-        start += chunk_size - overlap
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+
+        words = section.split()
+        if len(words) <= chunk_size:
+            # Seção cabe inteira num chunk
+            if len(words) >= 10:  # mínimo 10 palavras para ser útil
+                chunks.append(section)
+        else:
+            # Seção grande: dividir por parágrafos primeiro
+            paragraphs = re.split(r'\n\n+', section)
+            current_chunk = []
+            current_size = 0
+
+            for para in paragraphs:
+                para_words = len(para.split())
+                if current_size + para_words > chunk_size and current_chunk:
+                    chunks.append("\n\n".join(current_chunk).strip())
+                    # Overlap: manter último parágrafo
+                    if overlap > 0 and current_chunk:
+                        last = current_chunk[-1]
+                        current_chunk = [last]
+                        current_size = len(last.split())
+                    else:
+                        current_chunk = []
+                        current_size = 0
+                current_chunk.append(para)
+                current_size += para_words
+
+            if current_chunk:
+                text_chunk = "\n\n".join(current_chunk).strip()
+                if len(text_chunk.split()) >= 10:
+                    chunks.append(text_chunk)
+
+    # Fallback: se não gerou nada, usar divisão mecânica
+    if not chunks:
+        words = text.split()
+        start = 0
+        while start < len(words):
+            end = start + chunk_size
+            chunk = " ".join(words[start:end])
+            if chunk.strip():
+                chunks.append(chunk.strip())
+            start += chunk_size - overlap
+
     return chunks
 
 
@@ -140,8 +188,8 @@ def process_and_store_document(filepath: str, filename: str) -> dict:
             db.commit()
             return {"success": False, "error": doc.error_message}
 
-        # Criar chunks
-        chunks = split_text_into_chunks(text, chunk_size=500, overlap=50)
+        # Criar chunks (semânticos)
+        chunks = split_text_into_chunks(text, chunk_size=400, overlap=50)
         if not chunks:
             doc.status = "error"
             doc.error_message = "Nenhum chunk gerado"
@@ -197,55 +245,116 @@ def process_and_store_document(filepath: str, filename: str) -> dict:
         db.close()
 
 
-def get_relevant_context(query: str, max_chunks: int = 8, query_embedding=None) -> str:
+def get_relevant_context(query: str, max_chunks: int = 6, query_embedding=None) -> str:
     """
-    Busca chunks relevantes usando busca vetorial (cosine distance) no pgvector.
-    Faz fallback para busca por palavras-chave se não houver embeddings.
-    Aceita embedding pré-computado para evitar chamada redundante.
+    Busca chunks relevantes usando busca vetorial + keywords + nome do documento.
+    FILTRA chunks com distância > MAX_COSINE_DISTANCE para não retornar lixo.
+    SEMPRE complementa com busca por keywords e source name.
     """
     db = SessionLocal()
     try:
-        # Tentar busca vetorial
+        parts = []
+        seen_ids = set()
+
+        # 1. Busca vetorial (cosine distance)
         query_emb = query_embedding if query_embedding is not None else embed_single(query)
         if query_emb is not None:
+            distance_col = KnowledgeChunk.embedding.cosine_distance(query_emb)
             results = (
-                db.query(KnowledgeChunk)
+                db.query(KnowledgeChunk, distance_col.label("distance"))
                 .filter(KnowledgeChunk.embedding.isnot(None))
-                .order_by(KnowledgeChunk.embedding.cosine_distance(query_emb))
-                .limit(max_chunks)
+                .order_by(distance_col)
+                .limit(max_chunks * 3)
                 .all()
             )
             if results:
-                parts = []
-                for r in results:
+                for r, dist in results:
+                    if dist > MAX_COSINE_DISTANCE:
+                        continue
+                    if r.id in seen_ids:
+                        continue
                     src = r.source or "desconhecido"
-                    parts.append(f"[Fonte: {src}]\n{r.content}")
-                return "\n\n---\n\n".join(parts)
+                    # Injeta metadados de data para a IA saber a recência da informação
+                    date_str = r.created_at.strftime("%d/%m/%Y") if r.created_at else "Data desc."
+                    parts.append(f"[Fonte: {src} | Data Processamento: {date_str}]\n{r.content}")
+                    seen_ids.add(r.id)
+                    if len(parts) >= max_chunks:
+                        break
+                if results:
+                    logger.info("KB vetorial: %d chunks (melhor dist=%.3f)", len(parts), results[0][1])
 
-        # Fallback: busca por palavras-chave
-        logger.info("Busca vetorial indisponível, usando fallback por palavras-chave")
-        keywords = [w.lower() for w in query.split() if len(w) > 3]
-        if not keywords:
+        # 2. Busca por keywords e nome do documento (SEMPRE executa como complemento)
+        keywords = [w.lower() for w in query.split() if len(w) >= 2]
+        if keywords and len(parts) < max_chunks:
+            all_chunks = (
+                db.query(KnowledgeChunk)
+                .order_by(KnowledgeChunk.created_at.desc())
+                .limit(150)
+                .all()
+            )
+            scored = []
+            for chunk in all_chunks:
+                if chunk.id in seen_ids:
+                    continue
+                content_lower = chunk.content.lower()
+                source_lower = (chunk.source or "").lower()
+                # Pontuação por keywords no conteúdo
+                score = sum(1 for kw in keywords if kw in content_lower)
+                # Bonus: keywords no nome do documento/source (ex: "mikrotik" no filename)
+                source_score = sum(2 for kw in keywords if kw in source_lower)
+                score += source_score
+                if score > 0:
+                    scored.append((score, chunk))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            remaining = max_chunks - len(parts)
+            for _, chunk in scored[:remaining]:
+                if chunk.id not in seen_ids:
+                    src = chunk.source or "desconhecido"
+                    # Injeta metadados
+                    date_str = chunk.created_at.strftime("%d/%m/%Y") if chunk.created_at else "Data desc."
+                    parts.append(f"[Fonte: {src} | Data Processamento: {date_str}]\n{chunk.content}")
+                    seen_ids.add(chunk.id)
+
+        # 3. Busca por nome de documento (quando user pede "resumo de X", buscar chunks do doc X)
+        if len(parts) < max_chunks:
+            import re as _re
+            # Detectar padrões como "resumo de X", "sobre o documento X", "conteúdo de X"
+            doc_pattern = _re.search(
+                r'(?:resumo|resumir|conte[uú]do|sobre|documento|arquivo|pdf|aula)\s+(?:de|do|da|sobre)?\s*(.+)',
+                query, _re.IGNORECASE
+            )
+            if doc_pattern:
+                doc_name = doc_pattern.group(1).strip().lower()
+                doc_name = _re.sub(r'[?\.]$', '', doc_name).strip()
+                if len(doc_name) >= 3:
+                    doc_chunks = (
+                        db.query(KnowledgeChunk)
+                        .filter(KnowledgeChunk.source.isnot(None))
+                        .order_by(KnowledgeChunk.chunk_index.asc())
+                        .all()
+                    )
+                    for chunk in doc_chunks:
+                        if chunk.id in seen_ids:
+                            continue
+                        source_lower = (chunk.source or "").lower()
+                        # Match pelo nome do documento
+                        if doc_name in source_lower or any(
+                            w in source_lower for w in doc_name.split() if len(w) >= 3
+                        ):
+                            src = chunk.source or "desconhecido"
+                            # Injeta metadados
+                            date_str = chunk.created_at.strftime("%d/%m/%Y") if chunk.created_at else "Data desc."
+                            parts.append(f"[Fonte: {src} | Data Processamento: {date_str}]\n{chunk.content}")
+                            seen_ids.add(chunk.id)
+                            if len(parts) >= max_chunks * 2:
+                                break
+
+        if not parts:
+            logger.info("KB: nenhum chunk encontrado para '%s'", query[:50])
             return ""
 
-        all_chunks = db.query(KnowledgeChunk).all()
-        scored = []
-        for chunk in all_chunks:
-            content_lower = chunk.content.lower()
-            score = sum(1 for kw in keywords if kw in content_lower)
-            if score > 0:
-                scored.append((score, chunk))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = scored[:max_chunks]
-
-        if not top:
-            return ""
-
-        parts = []
-        for _, chunk in top:
-            src = chunk.source or "desconhecido"
-            parts.append(f"[Fonte: {src}]\n{chunk.content}")
+        logger.info("KB total: %d chunks para '%s'", len(parts), query[:50])
         return "\n\n---\n\n".join(parts)
 
     except Exception as e:
@@ -303,25 +412,13 @@ def get_training_history() -> List[dict]:
 
 
 def delete_document(doc_id: int) -> bool:
-    """Deleta documento e seus chunks."""
+    """Remove documento e seus chunks."""
     db = SessionLocal()
     try:
-        doc = db.query(Document).filter(Document.id == doc_id).first()
-        if not doc:
-            return False
-
         db.query(KnowledgeChunk).filter(KnowledgeChunk.document_id == doc_id).delete()
         db.query(TrainingStatus).filter(TrainingStatus.document_id == doc_id).delete()
-        db.delete(doc)
+        db.query(Document).filter(Document.id == doc_id).delete()
         db.commit()
-
-        # Remover arquivo físico
-        if doc.filepath and os.path.exists(doc.filepath):
-            try:
-                os.remove(doc.filepath)
-            except Exception:
-                pass
-
         return True
     except Exception as e:
         db.rollback()
@@ -344,7 +441,7 @@ def backfill_embeddings(batch_size: int = 32) -> dict:
         if not chunks:
             return {"updated": 0, "message": "Nenhum chunk sem embedding"}
 
-        texts = [c.content for c in chunks]
+        texts = [c.content[:1000] for c in chunks]
         embeddings = embed_texts(texts)
 
         if embeddings is None:

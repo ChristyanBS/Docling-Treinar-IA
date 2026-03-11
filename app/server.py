@@ -42,6 +42,7 @@ from app.memory_service import (
     get_past_conversations_context,
     get_recent_memories_summary,
     backfill_memory_embeddings,
+    register_user_feedback,
 )
 from app.embedding_service import embed_texts, embed_single
 
@@ -50,12 +51,12 @@ import threading
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MAX_KB_CONTEXT_CHARS = 3000
-MAX_MEMORY_CONTEXT_CHARS = 1500
+MAX_KB_CONTEXT_CHARS = 5000
+MAX_MEMORY_CONTEXT_CHARS = 3000
 
 # ── App ──────────────────────────────────────────────────
 
-app = FastAPI(title="Assistente CGR — Redes & Telecom", version="4.0.0")
+app = FastAPI(title="Assistente CGR — Redes & Telecom", version="5.0.0")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 IMG_DIR = STATIC_DIR / "img"
@@ -69,30 +70,39 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # ── System prompt ────────────────────────────────────────
 
 SYSTEM_PROMPT = (
-    "Você é o Assistente de Redes da CGR Telecom.\n"
+    "Você é o Especialista de Redes do CGR (Centro de Gerência de Redes).\n"
+    "Sua missão é apoiar a equipe técnica com precisão, segurança e agilidade.\n"
     "\n"
-    "Especialidades:\n"
-    "- Switches (Datacom, Intelbras, Huawei, Cisco)\n"
-    "- OLTs e ONTs/ONUs (Nokia/ALU, Huawei, Fiberhome, ZTE)\n"
-    "- Roteadores (Mikrotik, Cisco, Huawei)\n"
-    "- Protocolos: OSPF, BGP, STP, LACP, GPON, EPON\n"
-    "- VLANs, QoS, ACLs, NAT, DHCP, PPPoE\n"
-    "- Topologia, endereçamento IP, gerência de rede\n"
+    "DIRETRIZES DE COMPORTAMENTO (OBRIGATÓRIAS):\n"
+    "1. BASE ESTRITA: Suas respostas devem ser baseadas ESTRITAMENTE na 'Base de Conhecimento' (Documentos) e na 'Memória' fornecida.\n"
+    "2. PADRÕES DE MERCADO: Utilize padrões técnicos reconhecidos (Cisco, Juniper, MikroTik, Huawei, Datacom, RFCs) quando o documento for genérico.\n"
+    "3. SEM ALUCINAÇÕES: Se a informação não estiver no contexto, ADMITA: 'Não encontrei essa informação na minha base atual. Por favor, faça o upload do PDF técnico ou cole o procedimento para que eu possa aprender.'\n"
+    "4. SEGURANÇA OPERACIONAL: NUNCA exiba senhas em texto claro, mesmo que estejam nos documentos. Responda: 'A credencial está referenciada no documento X (consulte o cofre de senhas padrão)'.\n"
     "\n"
-    "Regras:\n"
-    "1. Sempre que possível, inclua os comandos CLI exatos para o equipamento.\n"
-    "2. Se não tiver certeza, diga que não sabe e sugira onde buscar.\n"
-    "3. Use o contexto da base de conhecimento fornecido.\n"
-    "4. Formate com markdown: código em blocos, listas, negrito para termos técnicos.\n"
-    "5. Responda em português do Brasil.\n"
-    "6. Se o usuário ensinar algo novo, confirme que aprendeu.\n"
+    "CASOS DE USO ESPECÍFICOS:\n"
+    "- Troubleshooting: Se o usuário relatar 'link caiu' ou 'latência', sugira passos de diagnóstico baseados nos manuais de contingência do CGR.\n"
+    "- Scripts: Ao gerar configurações (VLAN, OSPF), use a sintaxe exata do vendor solicitado e comente as linhas críticas.\n"
+    "- Inventário: Se perguntado 'onde está o servidor X', cite o documento e a data da informação para garantir que não é obsoleta.\n"
     "\n"
-    "Memória:\n"
-    "- Você tem memória persistente entre conversas.\n"
-    "- Os 'Fatos aprendidos anteriormente' são informações que o usuário já te ensinou. USE-OS para responder.\n"
-    "- Se o usuário perguntar sobre algo que está nos fatos aprendidos, responda com base neles.\n"
-    "- Quando o usuário ensinar algo novo (nomes, IPs, pessoas, configurações), confirme: 'Anotado! Vou lembrar que [fato].'\n"
-    "- Nunca diga que não sabe algo se a informação estiver nos fatos aprendidos ou na base de conhecimento.\n"
+    "=== MEMÓRIA PERSISTENTE (PRIORIDADE MÁXIMA) ===\n"
+    "Você possui memória que persiste entre conversas.\n"
+    "Abaixo você pode receber 'FATOS APRENDIDOS' — são informações que o usuário te ensinou.\n"
+    "REGRAS DE MEMÓRIA:\n"
+    "1. Fatos aprendidos superam manuais. Ex: Se o manual diz IP 192.168.1.1, mas a memória diz que no CGR usamos 10.0.0.1, responda 10.0.0.1.\n"
+    "2. Cite a fonte da memória. Ex: 'Conforme você me ensinou anteriormente...'.\n"
+    "REGRAS GERAIS:\n"
+    "- Se o usuário perguntar sobre algo que está nos fatos → RESPONDA usando os fatos.\n"
+    "- Se perguntar 'quem é X?' e X está nos fatos → responda com base nos fatos, NÃO invente.\n"
+    "- Se perguntar sobre lugares, equipes, supervisores → olhe nos fatos PRIMEIRO.\n"
+    "- Quando o usuário ensinar algo novo, confirme: 'Anotado! Vou lembrar que [fato].' e repita o fato EXATAMENTE como ele disse.\n"
+    "- Priorize informações recentes se houver conflito de datas.\n"
+    "\n"
+    "=== BASE DE CONHECIMENTO (DOCUMENTOS) ===\n"
+    "Você também pode receber conteúdo de documentos que foram enviados (PDFs, textos, etc).\n"
+    "REGRAS sobre documentos:\n"
+    "- Se receber conteúdo da 'Base de conhecimento técnico', USE esse conteúdo para responder.\n"
+    "- PRESTE ATENÇÃO À DATA DO DOCUMENTO (Metadata) se fornecida no contexto.\n"
+    "- Cite a fonte: 'Segundo o manual [Nome do Arquivo]...' .\n"
 )
 
 
@@ -175,7 +185,7 @@ def _save_assistant_response(session_id: str, user_msg: str, ai_msg: str):
 async def chat(request: Request):
     body = await request.json()
     user_msg = body.get("message", "").strip()
-    session_id = body.get("session_id", "default")
+    session_id = body.get("session_id") or "default"
 
     if not user_msg:
         return JSONResponse({"error": "Mensagem vazia"}, status_code=400)
@@ -187,25 +197,31 @@ async def chat(request: Request):
     query_emb = embed_single(user_msg)
 
     # Buscar contexto usando o embedding pré-computado
+    memory_context = get_relevant_memories(user_msg, max_results=10, query_embedding=query_emb)
     kb_context = get_relevant_context(user_msg, max_chunks=6, query_embedding=query_emb)
-    memory_context = get_relevant_memories(user_msg, max_results=5, query_embedding=query_emb)
-    conv_history = get_past_conversations_context(session_id, limit=10)
+    conv_history = get_past_conversations_context(session_id, limit=8)
 
-    # Montar mensagens
+    # Se não encontrou memórias relevantes, buscar fatos recentes como fallback
+    if not memory_context:
+        recent_summary = get_recent_memories_summary(limit=15)
+        if recent_summary:
+            memory_context = recent_summary
+
+    # Montar mensagens — MEMÓRIA tem prioridade sobre KB
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    if kb_context:
-        kb_trimmed = kb_context[:MAX_KB_CONTEXT_CHARS]
-        messages.append({
-            "role": "system",
-            "content": "Base de conhecimento relevante:\n\n" + kb_trimmed,
-        })
 
     if memory_context:
         mem_trimmed = memory_context[:MAX_MEMORY_CONTEXT_CHARS]
         messages.append({
             "role": "system",
-            "content": "Fatos aprendidos anteriormente:\n\n" + mem_trimmed,
+            "content": "=== FATOS APRENDIDOS (PRIORIDADE MÁXIMA — use estes para responder) ===\n\n" + mem_trimmed,
+        })
+
+    if kb_context:
+        kb_trimmed = kb_context[:MAX_KB_CONTEXT_CHARS]
+        messages.append({
+            "role": "system",
+            "content": "=== BASE DE CONHECIMENTO (documentos enviados — use para responder) ===\n\n" + kb_trimmed,
         })
 
     # Adicionar histórico como mensagens separadas (melhor para formato chat)
@@ -217,7 +233,10 @@ async def chat(request: Request):
     messages.append({"role": "user", "content": user_msg})
 
     total_chars = sum(len(m["content"]) for m in messages)
-    logger.info("Chat session=%s msgs=%d total_chars=%d", session_id, len(messages), total_chars)
+    logger.info("Chat session=%s msgs=%d total_chars=%d kb=%s mem=%s",
+                session_id, len(messages), total_chars,
+                "sim" if kb_context else "não",
+                "sim" if memory_context else "não")
 
     # Streaming
     full_response_parts = []
@@ -228,7 +247,7 @@ async def chat(request: Request):
             yield "event: token\ndata: " + json.dumps({"token": token}) + "\n\n"
         # Enviar done ANTES de salvar (não bloquear o cliente)
         yield "event: done\ndata: " + json.dumps({"session_id": session_id}) + "\n\n"
-        # Salvar resposta em background thread para não atrasar o SSE
+        # Salvar resposta em background thread
         ai_msg = "".join(full_response_parts)
         t = threading.Thread(
             target=_save_assistant_response,
@@ -363,7 +382,7 @@ async def learn(file: UploadFile = File(None), text: str = Form(None)):
 
     # Texto direto
     if text and text.strip():
-        chunks = split_text_into_chunks(text, chunk_size=500, overlap=50)
+        chunks = split_text_into_chunks(text, chunk_size=400, overlap=50)
         if not chunks:
             return {"success": False, "error": "Texto muito curto"}
 
@@ -497,7 +516,6 @@ def chat_sessions_list():
         sessions = db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
         result = []
         for s in sessions:
-            # Buscar última mensagem como preview
             last_msg = (
                 db.query(ChatMemory.content)
                 .filter(
@@ -563,6 +581,7 @@ async def memory_save(request: Request):
             session_id=session_id,
             role="system",
             content=fact,
+            fact=fact,
             memory_type="learned_fact",
         )
         emb = embed_texts([fact])
@@ -588,3 +607,19 @@ async def process_pipeline(request: Request):
 def cancel_pipeline():
     """Stub para cancelar pipeline."""
     return {"ok": True}
+
+
+@app.post("/api/chat/feedback")
+async def chat_feedback(request: Request):
+    """Recebe feedback (like/dislike) de uma mensagem."""
+    body = await request.json()
+    session_id = body.get("session_id")
+    user_msg = body.get("user_msg")
+    ai_msg = body.get("ai_msg")
+    feedback = body.get("feedback")  # "like" ou "dislike"
+
+    if not all([session_id, user_msg, ai_msg, feedback]):
+        return {"ok": False, "error": "Dados incompletos"}
+
+    success = register_user_feedback(session_id, user_msg, ai_msg, feedback)
+    return {"ok": success}

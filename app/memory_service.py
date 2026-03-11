@@ -11,12 +11,15 @@ from datetime import datetime
 import httpx
 
 from app.config import OLLAMA_BASE_URL, CHAT_MODEL
-from app.database import SessionLocal, ChatMemory
+from app.database import SessionLocal, ChatMemory, get_db
 from app.embedding_service import embed_texts, embed_single
 
 logger = logging.getLogger(__name__)
 
 _LLM_EXTRACT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+# Distância máxima para considerar memória relevante (mais permissivo = encontra mais)
+MAX_MEMORY_DISTANCE = 0.85
 
 
 def _llm_extract_facts(user_msg: str, ai_msg: str) -> List[str]:
@@ -25,10 +28,14 @@ def _llm_extract_facts(user_msg: str, ai_msg: str) -> List[str]:
         "Extraia SOMENTE os fatos novos e importantes desta troca de mensagens.\n"
         "Fatos são informações sobre: pessoas, nomes, cargos, IPs, equipamentos, "
         "senhas, configurações, procedimentos, locais, telefones, equipe.\n"
+        "REGRAS IMPORTANTES:\n"
+        "- COPIE os nomes próprios EXATAMENTE como o usuário escreveu, sem alterar.\n"
+        "- NÃO resuma, NÃO reformule, NÃO corrija ortografia de nomes.\n"
+        "- Mantenha todos os detalhes: nomes completos, cargos, locais, etc.\n"
         "Se não houver fatos novos, responda apenas: NENHUM\n"
         "Formato: um fato por linha, sem numeração.\n\n"
-        f"Usuário: {user_msg[:500]}\n"
-        f"Assistente: {ai_msg[:300]}\n\n"
+        f"Usuário: {user_msg[:800]}\n"
+        f"Assistente: {ai_msg[:400]}\n\n"
         "Fatos extraídos:"
     )
     try:
@@ -39,7 +46,7 @@ def _llm_extract_facts(user_msg: str, ai_msg: str) -> List[str]:
                     "model": CHAT_MODEL,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"num_ctx": 1024, "temperature": 0.1, "num_predict": 200},
+                    "options": {"num_ctx": 2048, "temperature": 0.05, "num_predict": 400},
                 },
             )
             if resp.status_code == 200:
@@ -54,8 +61,7 @@ def _llm_extract_facts(user_msg: str, ai_msg: str) -> List[str]:
 
 
 def extract_facts_from_exchange(user_msg: str, ai_msg: str) -> List[str]:
-    """Extrai fatos explícitos da troca de mensagens.
-    Analisa tanto a mensagem do usuário quanto a confirmação da IA."""
+    """Extrai fatos explícitos da troca de mensagens."""
     facts = []
     msg_lower = user_msg.lower().strip()
 
@@ -74,13 +80,9 @@ def extract_facts_from_exchange(user_msg: str, ai_msg: str) -> List[str]:
 
     # ── 2. Definições e identificações (X é Y) ──
     identity_patterns = [
-        # "Wallace é o coordenador", "Maria é a técnica"
         r"(\b[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)*)\s+(?:é|são|era|foi|será)\s+(.+?)(?:\.|!|\?|$)",
-        # "o Wallace é ...", "a Maria é ..."
         r"(?:o|a|os|as)\s+(\w+)\s+(?:é|são|era|foi|será|fica|tem|usa|funciona|trabalha|mora)\s+(.+?)(?:\.|!|\?|$)",
-        # "meu nome é ...", "eu sou ..."
         r"(?:meu\s+nome\s+(?:é|e)|eu\s+(?:sou|me\s+chamo))\s+(.+?)(?:\.|!|\?|,|$)",
-        # "eu trabalho ...", "eu moro ..."
         r"eu\s+(?:trabalho|moro|fico|estou)\s+(.+?)(?:\.|!|\?|$)",
     ]
     for pattern in identity_patterns:
@@ -133,26 +135,36 @@ def extract_facts_from_exchange(user_msg: str, ai_msg: str) -> List[str]:
                 facts.append("Correção: " + m.strip())
 
     # ── 6. IA confirmou que aprendeu → salvar mensagem original como fato ──
-    if not facts:
-        ai_lower = ai_msg.lower() if ai_msg else ""
-        ai_confirms = any(kw in ai_lower for kw in [
-            "vou lembrar", "anotado", "memorizado", "salvei", "guardei",
-            "registrado", "vou guardar", "aprendi", "entendido",
-            "lembrar disso", "vou anotar", "vou salvar",
-        ])
-        if ai_confirms and len(user_msg) > 10:
-            facts.append(user_msg[:500])
+    ai_lower = ai_msg.lower() if ai_msg else ""
+    ai_confirms = any(kw in ai_lower for kw in [
+        "vou lembrar", "anotado", "memorizado", "salvei", "guardei",
+        "registrado", "vou guardar", "aprendi", "entendido",
+        "lembrar disso", "vou anotar", "vou salvar",
+    ])
+    if ai_confirms and len(user_msg) > 10:
+        # Sempre salvar a mensagem original do usuário como fato (preserva texto exato)
+        raw = user_msg[:500]
+        if raw.lower() not in {f.lower() for f in facts}:
+            facts.append(raw)
 
-    # ── 7. Fallback: mensagem informativa longa com palavras-chave ──
-    if not facts and len(user_msg) > 30:
+    # ── 7. Fallback: QUALQUER mensagem informativa ──
+    if not facts and len(user_msg) > 20:
+        # Se a mensagem contém um verbo "é/são/tem/usa" → provavelmente informativa
+        has_info = re.search(
+            r'\b(?:é|são|tem|usa|usamos|fica|funciona|trabalha|chama|mora|está)\b',
+            user_msg, re.IGNORECASE
+        )
         info_keywords = [
             "ip", "vlan", "olt", "ont", "onu", "switch", "roteador",
             "porta", "config", "rede", "gpon", "epon", "nokia", "huawei",
             "datacom", "intelbras", "ospf", "bgp", "rack", "servidor",
             "coordenador", "gerente", "técnico", "equipe", "responsável",
             "telefone", "email", "endereço", "localização", "setor",
+            "nome", "chefe", "colega", "funcionário", "cliente",
+            "supervisor", "dono", "proprietário", "baia", "sala",
         ]
-        if any(kw in msg_lower for kw in info_keywords):
+        has_keyword = any(kw in msg_lower for kw in info_keywords)
+        if has_info or has_keyword:
             facts.append(user_msg[:500])
 
     # Deduplicar e limpar
@@ -172,7 +184,7 @@ def store_facts(session_id: str, user_msg: str, ai_msg: str) -> int:
     # Extração por regex (rápida)
     facts = extract_facts_from_exchange(user_msg, ai_msg)
 
-    # Extração por LLM (mais inteligente, roda em background mesmo)
+    # Extração por LLM (mais inteligente, roda em background)
     try:
         llm_facts = _llm_extract_facts(user_msg, ai_msg)
         if llm_facts:
@@ -196,7 +208,7 @@ def store_facts(session_id: str, user_msg: str, ai_msg: str) -> int:
                 db.query(ChatMemory.fact)
                 .filter(ChatMemory.memory_type == "learned_fact")
                 .order_by(ChatMemory.created_at.desc())
-                .limit(100)
+                .limit(200)
                 .all()
             )
             existing_facts = {r.fact.lower().strip() for r in recent if r.fact}
@@ -236,6 +248,48 @@ def store_facts(session_id: str, user_msg: str, ai_msg: str) -> int:
         db.close()
 
 
+def register_user_feedback(session_id: str, user_msg: str, ai_msg: str, feedback: str) -> bool:
+    """
+    Processa o Like/Dislike do usuário.
+    - 'like': Salva o par Pergunta+Resposta como um FATO APRENDIDO de alta relevância (1.0).
+    - 'dislike': Apenas loga. A correção real virá se o usuário digitar a resposta correta em seguida.
+    """
+    if feedback != "like":
+        logger.info("Feedback negativo recebido na sessão %s. Aguardando correção do usuário.", session_id)
+        return True
+
+    # Lógica do LIKE: Transformar a interação em memória de longo prazo (Golden Record)
+    try:
+        # Formata o conteúdo para que a IA entenda que isso é um par pergunta-resposta validado
+        text_to_save = f"Q: {user_msg}\nA: {ai_msg}"
+        
+        # Gerar embedding focado na PERGUNTA (para que perguntas similares encontrem essa resposta)
+        # Mas armazenamos o par completo no conteúdo.
+        emb = embed_single(user_msg) 
+        
+        if not emb:
+            return False
+
+        with get_db() as db:
+            mem = ChatMemory(
+                session_id=session_id,
+                role="system",
+                content=text_to_save,
+                fact=text_to_save, # Salva no campo 'fact' para ser recuperado pelo get_relevant_memories
+                memory_type="learned_fact",
+                relevance_score=1.0, # Score máximo para garantir prioridade sobre manuais
+                embedding=emb
+            )
+            db.add(mem)
+            # O commit é feito automaticamente pelo context manager get_db
+            logger.info("Feedback positivo! Resposta salva como Fato Aprendido (Score 1.0).")
+            return True
+            
+    except Exception as e:
+        logger.error("Erro ao salvar feedback: %s", e)
+        return False
+
+
 def store_interaction_memory(session_id: str, role: str, content: str, skip_embedding: bool = False) -> None:
     """Salva uma mensagem de conversa no banco. skip_embedding=True para não bloquear."""
     db = SessionLocal()
@@ -261,59 +315,88 @@ def store_interaction_memory(session_id: str, role: str, content: str, skip_embe
 
 
 def get_relevant_memories(query: str, max_results: int = 5, query_embedding=None) -> str:
-    """Busca memórias relevantes usando busca vetorial + keyword combinados."""
+    """Busca memórias relevantes usando busca vetorial + keyword + substring, COM filtro de distância."""
     db = SessionLocal()
     try:
         found = []
         seen_ids = set()
 
-        # Busca vetorial
+        # Busca vetorial COM filtro de relevância (mais permissivo)
         query_emb = query_embedding if query_embedding is not None else embed_single(query)
         if query_emb is not None:
+            distance_col = ChatMemory.embedding.cosine_distance(query_emb)
             results = (
-                db.query(ChatMemory)
+                db.query(ChatMemory, distance_col.label("distance"))
                 .filter(ChatMemory.embedding.isnot(None))
                 .filter(ChatMemory.memory_type == "learned_fact")
-                .order_by(ChatMemory.embedding.cosine_distance(query_emb))
-                .limit(max_results)
+                .order_by(distance_col)
+                .limit(max_results * 3)
                 .all()
             )
-            for r in results:
+            for r, dist in results:
+                if dist > MAX_MEMORY_DISTANCE:
+                    continue
                 found.append(r)
                 seen_ids.add(r.id)
 
         # Busca por keywords (complementa a vetorial)
-        keywords = [w.lower() for w in query.split() if len(w) > 2]
+        # Inclui palavras >= 2 chars para nomes curtos (ex: "CGR", "IP")
+        keywords = [w.lower() for w in query.split() if len(w) >= 2]
+        query_lower = query.lower()
+
+        all_mems = (
+            db.query(ChatMemory)
+            .filter(ChatMemory.memory_type == "learned_fact")
+            .order_by(ChatMemory.created_at.desc())
+            .limit(150)
+            .all()
+        )
+
         if keywords:
-            all_mems = (
-                db.query(ChatMemory)
-                .filter(ChatMemory.memory_type == "learned_fact")
-                .order_by(ChatMemory.created_at.desc())
-                .limit(200)
-                .all()
-            )
             scored = []
             for mem in all_mems:
                 if mem.id in seen_ids:
                     continue
                 content_lower = (mem.fact or mem.content or "").lower()
+                # Pontuação por keywords individuais
                 score = sum(1 for kw in keywords if kw in content_lower)
+                # Bonus: se a query inteira aparece no conteúdo (substring match)
+                if query_lower in content_lower:
+                    score += 5
+                # Bonus: nomes próprios parciais (2+ chars contíguos)
+                for kw in keywords:
+                    if len(kw) >= 3 and kw in content_lower:
+                        score += 1
                 if score > 0:
                     scored.append((score, mem))
             scored.sort(key=lambda x: x[0], reverse=True)
-            for _, mem in scored[:max_results]:
+            for _, mem in scored[:max_results * 2]:
                 if mem.id not in seen_ids:
+                    found.append(mem)
+                    seen_ids.add(mem.id)
+
+        # Busca por ILIKE no banco (nomes próprios que podem variar)
+        # Extrai palavras capitalizadas da query como possíveis nomes
+        import re as _re
+        nome_parts = _re.findall(r'[A-ZÀ-Ú][a-zà-ú]{2,}', query)
+        for nome in nome_parts:
+            for mem in all_mems:
+                if mem.id in seen_ids:
+                    continue
+                content_lower = (mem.fact or mem.content or "").lower()
+                if nome.lower() in content_lower:
                     found.append(mem)
                     seen_ids.add(mem.id)
 
         if not found:
             return ""
 
-        # Limitar ao max_results total
-        found = found[:max_results * 2]  # incluir ambas as fontes
+        found = found[:max_results * 2]
         parts = []
         for r in found:
             parts.append("- " + (r.fact or r.content))
+
+        logger.info("Memória: %d fatos encontrados para '%s'", len(parts), query[:50])
         return "\n".join(parts)
     except Exception as e:
         logger.error("Erro ao buscar memórias: %s", e)

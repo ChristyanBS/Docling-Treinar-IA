@@ -41,7 +41,7 @@ def chat_stream(messages: list, model: str = None) -> Generator[str, None, None]
                     "model": model,
                     "messages": messages,
                     "stream": True,
-                    "options": {"num_ctx": 4096},
+                    "options": {"num_ctx": 8192},
                 },
             ) as response:
                 if response.status_code != 200:
